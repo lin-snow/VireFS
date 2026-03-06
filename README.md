@@ -253,6 +253,44 @@ fs := virefs.NewLocalFS("/data", virefs.WithLocalKeyFunc(func(key string) string
 // Put("photo.jpg") → 实际写入 /data/2026/03/06/photo.jpg
 ```
 
+### Schema — 声明式文件组织
+
+用户数据库里只存简单的文件名（如 `cat.jpg`），但希望实际存储时按业务规则分目录。Schema 提供声明式的路由规则，按扩展名或自定义函数将文件归类到不同目录前缀。
+
+```go
+schema := virefs.NewSchema(
+    virefs.RouteByExt("images/", ".jpg", ".jpeg", ".png", ".gif", ".webp"),
+    virefs.RouteByExt("videos/", ".mp4", ".avi", ".mkv"),
+    virefs.RouteByExt("docs/",   ".pdf", ".doc", ".docx"),
+    virefs.DefaultRoute("other/"),
+)
+
+// 通过 WithLocalKeyFunc / WithObjectKeyFunc 接入
+fs := virefs.NewLocalFS("/data", virefs.WithLocalKeyFunc(schema.Resolve))
+
+fs.Put(ctx, "cat.jpg", r)       // → /data/images/cat.jpg
+fs.Put(ctx, "report.pdf", r)    // → /data/docs/report.pdf
+fs.Put(ctx, "readme.txt", r)    // → /data/other/readme.txt
+```
+
+对象存储同理：
+
+```go
+objFS := virefs.NewObjectFS(client, "bucket",
+    virefs.WithPrefix("uploads/"),
+    virefs.WithObjectKeyFunc(schema.Resolve),
+)
+// Put("cat.jpg") → S3 key: uploads/images/cat.jpg
+```
+
+路由规则按声明顺序匹配，第一个命中的生效。支持自定义匹配函数：
+
+```go
+virefs.RouteByFunc("archives/", func(key string) bool {
+    return strings.HasSuffix(key, ".tar.gz") || strings.HasSuffix(key, ".zip")
+})
+```
+
 ### MountTable — 多后端路由（可选）
 
 当需要通过单个 `FS` 接口操作多个后端时，使用 MountTable 按前缀路由：
