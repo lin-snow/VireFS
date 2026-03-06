@@ -21,31 +21,49 @@ type S3API interface {
 	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 }
 
+// ObjectOption configures an ObjectFS instance.
+type ObjectOption func(*ObjectFS)
+
+// WithPrefix sets a base prefix prepended to every key.
+// For example, WithPrefix("uploads/") makes Get(ctx, "a/b.txt") resolve to
+// S3 key "uploads/a/b.txt".
+func WithPrefix(prefix string) ObjectOption {
+	return func(o *ObjectFS) { o.basePrefix = prefix }
+}
+
+// WithObjectKeyFunc sets a KeyFunc that transforms every key after CleanKey
+// and before the key is combined with the base prefix.
+func WithObjectKeyFunc(fn KeyFunc) ObjectOption {
+	return func(o *ObjectFS) { o.keyFunc = fn }
+}
+
 // ObjectFS implements FS backed by an S3-compatible object store.
 type ObjectFS struct {
 	client     S3API
 	bucket     string
-	basePrefix string // optional prefix prepended to every key
+	basePrefix string
+	keyFunc    KeyFunc
 }
 
 // NewObjectFS creates an ObjectFS targeting the given bucket.
 //
-// basePrefix is joined before every key (e.g. "uploads/") so that a call to
-// Get(ctx, "a/b.txt") becomes GetObject with key "uploads/a/b.txt".
-// Pass "" for no prefix.
-//
-// To use a custom endpoint (MinIO, Ceph, R2, …) configure the *s3.Client:
+// Use WithPrefix to add a key prefix. To use a custom endpoint (MinIO, Ceph,
+// R2, ...) configure the *s3.Client before passing it in:
 //
 //	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 //	    o.BaseEndpoint = aws.String("https://s3.example.com")
 //	    o.UsePathStyle = true
 //	})
-func NewObjectFS(client S3API, bucket, basePrefix string) *ObjectFS {
-	return &ObjectFS{
-		client:     client,
-		bucket:     bucket,
-		basePrefix: basePrefix,
+//	fs := NewObjectFS(client, "my-bucket", WithPrefix("data/"))
+func NewObjectFS(client S3API, bucket string, opts ...ObjectOption) *ObjectFS {
+	o := &ObjectFS{
+		client: client,
+		bucket: bucket,
 	}
+	for _, fn := range opts {
+		fn(o)
+	}
+	return o
 }
 
 // s3Key prepends basePrefix and cleans the key.
@@ -53,6 +71,9 @@ func (o *ObjectFS) s3Key(key string) (string, error) {
 	cleaned, err := CleanKey(key)
 	if err != nil {
 		return "", err
+	}
+	if o.keyFunc != nil {
+		cleaned = o.keyFunc(cleaned)
 	}
 	return o.basePrefix + cleaned, nil
 }

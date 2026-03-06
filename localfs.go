@@ -9,19 +9,51 @@ import (
 	"strings"
 )
 
+// LocalOption configures a LocalFS instance.
+type LocalOption func(*LocalFS)
+
+// WithDirPerm sets the permission bits used when auto-creating directories.
+// Default is 0755.
+func WithDirPerm(perm os.FileMode) LocalOption {
+	return func(l *LocalFS) { l.dirPerm = perm }
+}
+
+// WithCreateRoot creates the root directory if it does not already exist.
+func WithCreateRoot() LocalOption {
+	return func(l *LocalFS) { l.createRoot = true }
+}
+
+// WithLocalKeyFunc sets a KeyFunc that transforms every key after CleanKey
+// and before the key is mapped to a local path.
+func WithLocalKeyFunc(fn KeyFunc) LocalOption {
+	return func(l *LocalFS) { l.keyFunc = fn }
+}
+
 // LocalFS implements FS backed by a local directory.
 type LocalFS struct {
-	root string // absolute path to the mount root
+	root       string
+	dirPerm    os.FileMode
+	createRoot bool
+	keyFunc    KeyFunc
 }
 
 // NewLocalFS creates a LocalFS rooted at the given directory.
-// The directory must already exist.
-func NewLocalFS(root string) *LocalFS {
+func NewLocalFS(root string, opts ...LocalOption) *LocalFS {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		abs = root
 	}
-	return &LocalFS{root: abs}
+	l := &LocalFS{
+		root:    abs,
+		dirPerm: 0o755,
+	}
+	for _, o := range opts {
+		o(l)
+	}
+	if l.createRoot {
+		_ = os.MkdirAll(l.root, l.dirPerm)
+	}
+	return l
 }
 
 // fullPath resolves a cleaned key to an absolute local path and ensures it
@@ -30,6 +62,9 @@ func (l *LocalFS) fullPath(key string) (string, error) {
 	cleaned, err := CleanKey(key)
 	if err != nil {
 		return "", err
+	}
+	if l.keyFunc != nil {
+		cleaned = l.keyFunc(cleaned)
 	}
 	joined := filepath.Join(l.root, filepath.FromSlash(cleaned))
 	abs, err := filepath.Abs(joined)
@@ -59,7 +94,7 @@ func (l *LocalFS) Put(_ context.Context, key string, r io.Reader) error {
 	if err != nil {
 		return &OpError{Op: "Put", Key: key, Err: err}
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(p), l.dirPerm); err != nil {
 		return &OpError{Op: "Put", Key: key, Err: err}
 	}
 	f, err := os.Create(p)

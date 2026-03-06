@@ -12,7 +12,7 @@ func TestMountTable_Routing(t *testing.T) {
 	dir := t.TempDir()
 	local := NewLocalFS(dir)
 	fake := newFakeS3()
-	obj := NewObjectFS(fake, "bucket", "")
+	obj := NewObjectFS(fake, "bucket")
 
 	mt := NewMountTable()
 	if err := mt.Mount("local", local); err != nil {

@@ -50,7 +50,7 @@ All backend errors are wrapped in `*OpError{Op, Key, Err}` for easy debugging.
 ```go
 mt := virefs.NewMountTable()
 mt.Mount("local", virefs.NewLocalFS("/data/files"))
-mt.Mount("s3",    virefs.NewObjectFS(s3Client, "my-bucket", "prefix/"))
+mt.Mount("s3",    virefs.NewObjectFS(s3Client, "my-bucket", virefs.WithPrefix("prefix/")))
 
 // Routed automatically by prefix:
 mt.Get(ctx, "local/reports/q1.csv")   // → LocalFS("/data/files").Get("reports/q1.csv")
@@ -62,7 +62,7 @@ mt.Get(ctx, "s3/images/logo.png")     // → ObjectFS(bucket).Get("prefix/images
 ### Local filesystem only
 
 ```go
-fs := virefs.NewLocalFS("/tmp/mydata")
+fs := virefs.NewLocalFS("/tmp/mydata", virefs.WithCreateRoot())
 _ = fs.Put(ctx, "hello.txt", strings.NewReader("world"))
 
 rc, _ := fs.Get(ctx, "hello.txt")
@@ -80,8 +80,25 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
     o.UsePathStyle = true
 })
 
-fs := virefs.NewObjectFS(client, "my-bucket", "")
+fs := virefs.NewObjectFS(client, "my-bucket", virefs.WithPrefix("app/"))
 _ = fs.Put(ctx, "data.json", strings.NewReader(`{"ok":true}`))
+// writes to S3 key: "app/data.json"
+```
+
+### Key transformation (KeyFunc)
+
+Use `WithLocalKeyFunc` / `WithObjectKeyFunc` to transform keys before they hit storage. The function receives a cleaned key (no `..`, no leading slashes) and returns the final key.
+
+```go
+fs := virefs.NewLocalFS("/data", virefs.WithLocalKeyFunc(func(key string) string {
+    return time.Now().Format("2006/01/02") + "/" + key
+}))
+// Put("photo.jpg", ...) actually writes to /data/2026/03/06/photo.jpg
+
+objFS := virefs.NewObjectFS(client, "bucket", virefs.WithObjectKeyFunc(func(key string) string {
+    return "v2/" + key
+}))
+// Get("config.yaml") fetches S3 key "v2/config.yaml"
 ```
 
 ## License

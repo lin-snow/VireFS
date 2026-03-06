@@ -100,6 +100,39 @@ func TestLocalFS_NestedPut(t *testing.T) {
 	}
 }
 
+func TestLocalFS_WithKeyFunc(t *testing.T) {
+	dir := t.TempDir()
+	fs := NewLocalFS(dir, WithLocalKeyFunc(func(key string) string {
+		return "transformed/" + key
+	}))
+	ctx := context.Background()
+
+	if err := fs.Put(ctx, "note.txt", strings.NewReader("hello")); err != nil {
+		t.Fatalf("Put with KeyFunc: %v", err)
+	}
+
+	rc, err := fs.Get(ctx, "note.txt")
+	if err != nil {
+		t.Fatalf("Get with KeyFunc: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "hello" {
+		t.Fatalf("Get content = %q, want %q", data, "hello")
+	}
+
+	plain := NewLocalFS(dir)
+	rc, err = plain.Get(ctx, "transformed/note.txt")
+	if err != nil {
+		t.Fatalf("plain Get transformed path: %v", err)
+	}
+	data, _ = io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "hello" {
+		t.Fatalf("plain Get content = %q, want %q", data, "hello")
+	}
+}
+
 func TestLocalFS_TraversalRejected(t *testing.T) {
 	dir := t.TempDir()
 	fs := NewLocalFS(dir)

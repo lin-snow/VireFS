@@ -51,6 +51,11 @@ type FS interface {
 	Stat(ctx context.Context, key string) (*FileInfo, error)
 }
 
+// KeyFunc transforms a cleaned key before it reaches the storage backend.
+// It is called after CleanKey, so the input is already normalised (no "..",
+// no leading/trailing slashes). The returned string is used as-is.
+type KeyFunc func(key string) string
+
 // OpError wraps a backend error with operation context.
 type OpError struct {
 	Op  string // e.g. "Get", "Put"

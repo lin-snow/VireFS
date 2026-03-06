@@ -83,7 +83,7 @@ func (f *fakeS3) ListObjectsV2(_ context.Context, in *s3.ListObjectsV2Input, _ .
 
 func TestObjectFS_PutGetDeleteStat(t *testing.T) {
 	fake := newFakeS3()
-	fs := NewObjectFS(fake, "test-bucket", "")
+	fs := NewObjectFS(fake, "test-bucket")
 	ctx := context.Background()
 
 	if err := fs.Put(ctx, "doc.txt", strings.NewReader("hello")); err != nil {
@@ -120,7 +120,7 @@ func TestObjectFS_PutGetDeleteStat(t *testing.T) {
 
 func TestObjectFS_BasePrefix(t *testing.T) {
 	fake := newFakeS3()
-	fs := NewObjectFS(fake, "bucket", "data/")
+	fs := NewObjectFS(fake, "bucket", WithPrefix("data/"))
 	ctx := context.Background()
 
 	_ = fs.Put(ctx, "a.txt", strings.NewReader("a"))
@@ -142,7 +142,7 @@ func TestObjectFS_BasePrefix(t *testing.T) {
 
 func TestObjectFS_List(t *testing.T) {
 	fake := newFakeS3()
-	fs := NewObjectFS(fake, "bucket", "pfx/")
+	fs := NewObjectFS(fake, "bucket", WithPrefix("pfx/"))
 	ctx := context.Background()
 
 	_ = fs.Put(ctx, "dir/x.txt", strings.NewReader("x"))
@@ -158,9 +158,38 @@ func TestObjectFS_List(t *testing.T) {
 	}
 }
 
+func TestObjectFS_WithKeyFunc(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket", WithPrefix("base/"), WithObjectKeyFunc(func(key string) string {
+		return "2026/03/06/" + key
+	}))
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "photo.jpg", strings.NewReader("img"))
+
+	wantKey := "base/2026/03/06/photo.jpg"
+	if _, ok := fake.objects[wantKey]; !ok {
+		keys := make([]string, 0, len(fake.objects))
+		for k := range fake.objects {
+			keys = append(keys, k)
+		}
+		t.Fatalf("expected object at %q, got keys %v", wantKey, keys)
+	}
+
+	rc, err := fs.Get(ctx, "photo.jpg")
+	if err != nil {
+		t.Fatalf("Get with KeyFunc: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "img" {
+		t.Fatalf("Get content = %q, want %q", data, "img")
+	}
+}
+
 func TestObjectFS_NotFound(t *testing.T) {
 	fake := newFakeS3()
-	fs := NewObjectFS(fake, "bucket", "")
+	fs := NewObjectFS(fake, "bucket")
 	ctx := context.Background()
 
 	_, err := fs.Get(ctx, "nope.txt")
