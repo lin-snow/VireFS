@@ -11,10 +11,10 @@ import (
 
 // Sentinel errors shared across all FS implementations.
 var (
-	ErrNotFound       = errors.New("virefs: not found")
-	ErrInvalidKey     = errors.New("virefs: invalid key")
-	ErrAlreadyExist   = errors.New("virefs: already exists")
-	ErrNotSupported   = errors.New("virefs: operation not supported")
+	ErrNotFound     = errors.New("virefs: not found")
+	ErrInvalidKey   = errors.New("virefs: invalid key")
+	ErrAlreadyExist = errors.New("virefs: already exists")
+	ErrNotSupported = errors.New("virefs: operation not supported")
 )
 
 // FileInfo describes a single object / file stored in a FS.

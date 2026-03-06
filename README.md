@@ -1,5 +1,10 @@
 # VireFS
 
+[![CI](https://github.com/lin-snow/VireFS/actions/workflows/ci.yml/badge.svg)](https://github.com/lin-snow/VireFS/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/lin-snow/VireFS.svg)](https://pkg.go.dev/github.com/lin-snow/VireFS)
+[![GitHub Release](https://img.shields.io/github/v/release/lin-snow/VireFS)](https://github.com/lin-snow/VireFS/releases)
+[![License](https://img.shields.io/github/license/lin-snow/VireFS)](LICENSE)
+
 **VireFS** 是一个极简的 Go 文件系统抽象库。
 
 它将**本地文件系统**和 **S3 兼容的对象存储**统一到同一套接口之下——你的业务代码只跟 `key` 打交道，不关心文件存在磁盘上还是云端。
@@ -98,8 +103,16 @@ type FS interface {
 ### 安装
 
 ```bash
-go get github.com/lin-snow/VireFS
+go get github.com/lin-snow/VireFS@latest
 ```
+
+建议在生产项目中锁定到具体版本：
+
+```bash
+go get github.com/lin-snow/VireFS@v0.1.0
+```
+
+所有可用版本请查看 [Releases](https://github.com/lin-snow/VireFS/releases)。
 
 ### 本地文件系统
 
@@ -343,6 +356,14 @@ flowchart LR
 | `WithContentType(ct)` | 设置 MIME 类型 |
 | `WithMetadata(m)` | 设置自定义元数据 |
 
+## 参与贡献
+
+欢迎贡献代码、报告 Bug 或提出建议！请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解开发流程和规范。
+
+- [行为准则](CODE_OF_CONDUCT.md)
+- [安全策略](SECURITY.md)
+- [获取支持](SUPPORT.md)
+
 ## License
 
-See [LICENSE](LICENSE).
+[Apache License 2.0](LICENSE)
