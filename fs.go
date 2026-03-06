@@ -38,7 +38,8 @@ type FS interface {
 
 	// Put writes content from r under the given key.
 	// If the key already exists its content is overwritten.
-	Put(ctx context.Context, key string, r io.Reader) error
+	// Use PutOption to set ContentType, Metadata, etc.
+	Put(ctx context.Context, key string, r io.Reader, opts ...PutOption) error
 
 	// Delete removes the object addressed by key.
 	// Returns ErrNotFound if the key does not exist.
@@ -56,6 +57,72 @@ type FS interface {
 	// LocalFS returns AccessInfo.Path (absolute file path).
 	// ObjectFS returns AccessInfo.URL (presigned or public URL).
 	Access(ctx context.Context, key string) (*AccessInfo, error)
+}
+
+// PutOption configures a Put operation.
+type PutOption func(*PutConfig)
+
+// PutConfig holds optional parameters for Put.
+type PutConfig struct {
+	ContentType string
+	Metadata    map[string]string
+}
+
+// BuildPutConfig applies all PutOptions and returns the resulting config.
+func BuildPutConfig(opts []PutOption) PutConfig {
+	var c PutConfig
+	for _, o := range opts {
+		o(&c)
+	}
+	return c
+}
+
+// WithContentType sets the MIME type of the content being uploaded.
+// ObjectFS passes it to S3 PutObject; LocalFS ignores it.
+func WithContentType(ct string) PutOption {
+	return func(c *PutConfig) { c.ContentType = ct }
+}
+
+// WithMetadata attaches custom key-value metadata to the uploaded object.
+// ObjectFS passes it as S3 user metadata; LocalFS ignores it.
+func WithMetadata(m map[string]string) PutOption {
+	return func(c *PutConfig) { c.Metadata = m }
+}
+
+// Exists is a convenience helper that checks whether a key exists in fs.
+// It returns (false, nil) when the key is not found, rather than an error.
+func Exists(ctx context.Context, fs FS, key string) (bool, error) {
+	_, err := fs.Stat(ctx, key)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return false, err
+}
+
+// Copier is an optional interface for efficient same-backend copies.
+// Use a type assertion to check: if c, ok := fs.(Copier); ok { ... }
+type Copier interface {
+	Copy(ctx context.Context, srcKey, dstKey string) error
+}
+
+// Copy copies a file from src to dst. If src and dst are the same FS instance
+// and it implements Copier, the native (efficient) copy is used. Otherwise it
+// falls back to Get + Put.
+func Copy(ctx context.Context, src FS, srcKey string, dst FS, dstKey string, opts ...PutOption) error {
+	if src == dst {
+		if c, ok := src.(Copier); ok {
+			return c.Copy(ctx, srcKey, dstKey)
+		}
+	}
+	rc, err := src.Get(ctx, srcKey)
+	if err != nil {
+		return fmt.Errorf("copy: get %q: %w", srcKey, err)
+	}
+	defer rc.Close()
+	return dst.Put(ctx, dstKey, rc, opts...)
 }
 
 // AccessInfo describes how to access a file from outside the FS abstraction.

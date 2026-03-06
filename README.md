@@ -1,79 +1,140 @@
 # VireFS
 
-**VireFS** is a lightweight filesystem abstraction layer for Go.
+**VireFS** 是一个极简的 Go 文件系统抽象库。
 
-It provides a unified interface to access different storage backends such as **local filesystems and object storage (e.g. S3)** through a single, consistent API.
-
-The goal of VireFS is to make file operations **backend-agnostic**, allowing applications to switch or combine storage systems without changing business logic.
+它将**本地文件系统**和 **S3 兼容的对象存储**统一到同一套接口之下——你的业务代码只跟 `key` 打交道，不关心文件存在磁盘上还是云端。
 
 ---
 
-## Features
+## 定位
 
-* Unified filesystem abstraction
-* Multiple storage backends
-* Simple and idiomatic Go API
-* Easy backend switching (local ↔ object storage)
-* Designed for cloud-native applications
-* Extensible driver architecture
+> **一句话**：用 key 管理文件，后端透明。
 
-## Core Interface
+典型使用场景：你的项目既有本地文件（用户上传暂存、导出报表等），又有对象存储里的文件（图片、视频、备份等），文件的 key 存在你的数据库里，通过 VireFS 用同一套 API 操作它们。
+
+```
+你的业务代码 ──key──▶ VireFS ──▶ 本地磁盘 / S3 / MinIO / R2 / ...
+```
+
+## 架构
+
+```mermaid
+flowchart TB
+    app["业务代码"]
+    app -->|"key"| fsInterface["virefs.FS 接口"]
+
+    subgraph backends [存储后端]
+        localFS["LocalFS\n本地目录"]
+        objectFS["ObjectFS\nS3 兼容对象存储"]
+    end
+
+    fsInterface --> localFS
+    fsInterface --> objectFS
+
+    localFS -->|"root + key"| disk["本地磁盘"]
+    objectFS -->|"prefix + key"| s3["S3 / MinIO / R2"]
+
+    subgraph optional [可选能力]
+        presigner["Presigner\n预签名 URL"]
+        copier["Copier\n高效复制"]
+        accessFn["AccessFunc\nCDN / 自定义 URL"]
+    end
+
+    objectFS -.-> presigner
+    objectFS -.-> copier
+    localFS -.-> copier
+    objectFS -.-> accessFn
+```
+
+## 核心概念
+
+### Key
+
+所有操作以 `key` 为寻址核心。key 是以 `/` 分隔的路径，例如 `photos/2026/cat.jpg`。
+
+- 自动清理首尾 `/`、合并重复 `/`、解析 `.`
+- 禁止 `..` 跳出，保证安全
+
+### FS 接口
 
 ```go
 type FS interface {
-    Get(ctx context.Context, key string) (io.ReadCloser, error)
-    Put(ctx context.Context, key string, r io.Reader) error
-    Delete(ctx context.Context, key string) error
-    List(ctx context.Context, prefix string) (*ListResult, error)
-    Stat(ctx context.Context, key string) (*FileInfo, error)
-    Access(ctx context.Context, key string) (*AccessInfo, error)
+    Get(ctx, key)                        // 读取文件内容
+    Put(ctx, key, reader, ...PutOption)  // 写入（支持 ContentType、Metadata）
+    Delete(ctx, key)                     // 删除
+    List(ctx, prefix)                    // 按前缀列举
+    Stat(ctx, key)                       // 获取元信息
+    Access(ctx, key)                     // 获取外部访问路径/URL
 }
 ```
 
-### Key Convention
+### 后端
 
-* Keys use `/` as separator — e.g. `docs/readme.txt`.
-* No leading or trailing slashes needed; they are trimmed automatically.
-* `..` traversal is rejected as invalid.
+| 后端 | 构造函数 | root 概念 |
+|---|---|---|
+| **LocalFS** | `NewLocalFS(rootDir, ...LocalOption)` | 指定的本地目录 |
+| **ObjectFS** | `NewObjectFS(s3Client, bucket, ...ObjectOption)` | endpoint + bucket |
 
-### Error Model
+### 可选能力（类型断言）
 
-| Sentinel | Meaning |
+| 接口 | 说明 | 实现者 |
+|---|---|---|
+| `Presigner` | 生成预签名上传/下载 URL | ObjectFS |
+| `Copier` | 同后端高效复制 | LocalFS, ObjectFS |
+
+### 错误模型
+
+| 哨兵错误 | 含义 |
 |---|---|
-| `ErrNotFound` | Key does not exist |
-| `ErrInvalidKey` | Key contains illegal patterns (e.g. `..`) |
-| `ErrAlreadyExist` | Resource already exists (reserved) |
-| `ErrNotSupported` | Operation not supported by this backend |
+| `ErrNotFound` | key 不存在 |
+| `ErrInvalidKey` | key 包含非法模式（如 `..`） |
+| `ErrAlreadyExist` | 资源已存在（保留） |
+| `ErrNotSupported` | 当前后端不支持此操作 |
 
-All backend errors are wrapped in `*OpError{Op, Key, Err}` for easy debugging.
+所有后端错误都被包装为 `*OpError{Op, Key, Err}`，方便定位问题。
 
-## Mount & Routing
+## 快速上手
 
-```go
-mt := virefs.NewMountTable()
-mt.Mount("local", virefs.NewLocalFS("/data/files"))
-mt.Mount("s3",    virefs.NewObjectFS(s3Client, "my-bucket", virefs.WithPrefix("prefix/")))
+### 安装
 
-// Routed automatically by prefix:
-mt.Get(ctx, "local/reports/q1.csv")   // → LocalFS("/data/files").Get("reports/q1.csv")
-mt.Get(ctx, "s3/images/logo.png")     // → ObjectFS(bucket).Get("prefix/images/logo.png")
+```bash
+go get github.com/lin-snow/VireFS
 ```
 
-## Quick Start
-
-### Local filesystem only
+### 本地文件系统
 
 ```go
-fs := virefs.NewLocalFS("/tmp/mydata", virefs.WithCreateRoot())
-_ = fs.Put(ctx, "hello.txt", strings.NewReader("world"))
+package main
 
-rc, _ := fs.Get(ctx, "hello.txt")
-defer rc.Close()
-data, _ := io.ReadAll(rc)
-fmt.Println(string(data)) // "world"
+import (
+    "context"
+    "fmt"
+    "io"
+    "strings"
+
+    virefs "github.com/lin-snow/VireFS"
+)
+
+func main() {
+    ctx := context.Background()
+    fs := virefs.NewLocalFS("/tmp/mydata", virefs.WithCreateRoot())
+
+    // 写入
+    _ = fs.Put(ctx, "hello.txt", strings.NewReader("world"))
+
+    // 读取
+    rc, _ := fs.Get(ctx, "hello.txt")
+    defer rc.Close()
+    data, _ := io.ReadAll(rc)
+    fmt.Println(string(data)) // "world"
+
+    // 获取本地路径
+    info, _ := fs.Access(ctx, "hello.txt")
+    fmt.Println(info.Path) // "/tmp/mydata/hello.txt"
+}
 ```
 
-### Object storage (S3-compatible)
+### 对象存储（S3 / MinIO / R2）
 
 ```go
 cfg, _ := config.LoadDefaultConfig(ctx)
@@ -82,89 +143,167 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
     o.UsePathStyle = true
 })
 
-fs := virefs.NewObjectFS(client, "my-bucket", virefs.WithPrefix("app/"))
-_ = fs.Put(ctx, "data.json", strings.NewReader(`{"ok":true}`))
-// writes to S3 key: "app/data.json"
+fs := virefs.NewObjectFS(client, "my-bucket", virefs.WithPrefix("uploads/"))
+
+// 上传并指定 ContentType
+_ = fs.Put(ctx, "photo.jpg", file,
+    virefs.WithContentType("image/jpeg"),
+    virefs.WithMetadata(map[string]string{"user": "alice"}),
+)
 ```
 
-### Key transformation (KeyFunc)
+## 功能详解
 
-Use `WithLocalKeyFunc` / `WithObjectKeyFunc` to transform keys before they hit storage. The function receives a cleaned key (no `..`, no leading slashes) and returns the final key.
+### Put 选项：ContentType 和 Metadata
+
+ObjectFS 会将这些信息传递给 S3 PutObject；LocalFS 会忽略它们（本地文件系统无此概念）。
+
+```go
+_ = fs.Put(ctx, "report.pdf", file,
+    virefs.WithContentType("application/pdf"),
+    virefs.WithMetadata(map[string]string{"version": "2"}),
+)
+```
+
+### Exists — 检查 key 是否存在
+
+包级别便捷函数，内部调用 `Stat`，将 `ErrNotFound` 转为 `false`。
+
+```go
+ok, _ := virefs.Exists(ctx, fs, "maybe.txt")
+```
+
+### Copy — 文件复制
+
+同后端复制走原生高效路径（S3 `CopyObject`、本地文件复制），跨后端自动退化为 `Get` + `Put`。
+
+```go
+// 同后端（S3 内部复制，无需下载再上传）
+_ = virefs.Copy(ctx, objFS, "src.txt", objFS, "dst.txt")
+
+// 跨后端（本地 → S3）
+_ = virefs.Copy(ctx, localFS, "export.csv", objFS, "imports/export.csv",
+    virefs.WithContentType("text/csv"),
+)
+```
+
+### Access — 获取外部访问信息
+
+核心 FS 接口方法，根据后端返回不同内容：
+
+| 后端 | `AccessInfo.Path` | `AccessInfo.URL` |
+|---|---|---|
+| LocalFS | 绝对文件路径 | 空 |
+| ObjectFS | 空 | 预签名/公开/CDN URL |
+
+```go
+// LocalFS
+info, _ := localFS.Access(ctx, "doc.pdf")
+fmt.Println(info.Path) // "/data/doc.pdf"
+
+// ObjectFS（自动选择：AccessFunc > Presign > BaseURL）
+info, _ = objFS.Access(ctx, "doc.pdf")
+fmt.Println(info.URL)
+```
+
+自定义 CDN 域名：
+
+```go
+fs := virefs.NewObjectFS(client, "bucket",
+    virefs.WithPrefix("assets/"),
+    virefs.WithAccessFunc(func(key string) *virefs.AccessInfo {
+        return &virefs.AccessInfo{URL: "https://cdn.example.com/" + key}
+    }),
+)
+// Access("img/logo.png") → "https://cdn.example.com/assets/img/logo.png"
+```
+
+### 预签名 URL
+
+通过 `Presigner` 可选接口，使用类型断言获取预签名能力：
+
+```go
+fs := virefs.NewObjectFS(client, "bucket",
+    virefs.WithPresignClient(s3.NewPresignClient(client)),
+)
+
+if p, ok := fs.(virefs.Presigner); ok {
+    get, _ := p.PresignGet(ctx, "secret.pdf", 15*time.Minute)
+    put, _ := p.PresignPut(ctx, "upload.zip", 30*time.Minute)
+    fmt.Println(get.URL, put.URL)
+}
+```
+
+### 原子写入（LocalFS）
+
+启用后 Put 先写临时文件，再原子 rename，防止并发写入数据损坏。
+
+```go
+fs := virefs.NewLocalFS("/data", virefs.WithAtomicWrite())
+```
+
+### Key 变换（KeyFunc）
+
+在 `CleanKey` 之后、实际存储操作之前，对 key 进行自定义变换：
 
 ```go
 fs := virefs.NewLocalFS("/data", virefs.WithLocalKeyFunc(func(key string) string {
     return time.Now().Format("2006/01/02") + "/" + key
 }))
-// Put("photo.jpg", ...) actually writes to /data/2026/03/06/photo.jpg
-
-objFS := virefs.NewObjectFS(client, "bucket", virefs.WithObjectKeyFunc(func(key string) string {
-    return "v2/" + key
-}))
-// Get("config.yaml") fetches S3 key "v2/config.yaml"
+// Put("photo.jpg") → 实际写入 /data/2026/03/06/photo.jpg
 ```
 
-### Access — get a path or URL for any file
+### MountTable — 多后端路由（可选）
 
-`Access` is part of the core `FS` interface. It returns backend-specific access info: a local file path for `LocalFS`, or a URL for `ObjectFS`.
+当需要通过单个 `FS` 接口操作多个后端时，使用 MountTable 按前缀路由：
 
 ```go
-// LocalFS → returns absolute file path
-local := virefs.NewLocalFS("/data/files")
-info, _ := local.Access(ctx, "report.pdf")
-fmt.Println(info.Path) // "/data/files/report.pdf"
+mt := virefs.NewMountTable()
+mt.Mount("local", virefs.NewLocalFS("/data/files"))
+mt.Mount("s3",    virefs.NewObjectFS(s3Client, "my-bucket"))
 
-// ObjectFS with presign client → returns presigned URL (default 15min expiry)
-objFS := virefs.NewObjectFS(client, "bucket",
-    virefs.WithPresignClient(s3.NewPresignClient(client)),
-    virefs.WithAccessExpires(30*time.Minute),
-)
-info, _ = objFS.Access(ctx, "report.pdf")
-fmt.Println(info.URL) // "https://bucket.s3...?X-Amz-Signature=..."
-
-// ObjectFS with base URL (no presign) → returns plain public URL
-plainFS := virefs.NewObjectFS(client, "bucket",
-    virefs.WithBaseURL("https://my-bucket.s3.us-east-1.amazonaws.com"),
-    virefs.WithPrefix("assets/"),
-)
-info, _ = plainFS.Access(ctx, "logo.png")
-fmt.Println(info.URL) // "https://my-bucket.s3.us-east-1.amazonaws.com/assets/logo.png"
+mt.Get(ctx, "local/reports/q1.csv")  // → LocalFS
+mt.Put(ctx, "s3/images/logo.png", r) // → ObjectFS
 ```
 
-For full control (CDN, multi-domain routing, etc.), use `WithAccessFunc`. It receives the fully resolved S3 key and takes priority over presign client and base URL:
+## Key 处理流水线
 
-```go
-cdnFS := virefs.NewObjectFS(client, "bucket",
-    virefs.WithPrefix("assets/"),
-    virefs.WithPresignClient(presignClient), // still available via Presigner interface
-    virefs.WithAccessFunc(func(key string) *virefs.AccessInfo {
-        return &virefs.AccessInfo{URL: "https://cdn.example.com/" + key}
-    }),
-)
-info, _ := cdnFS.Access(ctx, "img/logo.png")
-fmt.Println(info.URL) // "https://cdn.example.com/assets/img/logo.png"
+```mermaid
+flowchart LR
+    raw["原始 key"] --> clean["CleanKey\n规范化 + 安全校验"]
+    clean --> keyFunc["KeyFunc\n用户自定义变换"]
+    keyFunc --> prefix["basePrefix\n拼接前缀"]
+    prefix --> backend["存储后端操作"]
 ```
 
-### Presigned URLs (S3 only)
+## 完整 Option 速查
 
-`ObjectFS` implements the optional `Presigner` interface when a presign client is provided. Use a type assertion to access it.
+### LocalFS
 
-```go
-presignClient := s3.NewPresignClient(client)
-fs := virefs.NewObjectFS(client, "my-bucket",
-    virefs.WithPrefix("uploads/"),
-    virefs.WithPresignClient(presignClient),
-)
+| Option | 说明 |
+|---|---|
+| `WithCreateRoot()` | root 目录不存在时自动创建 |
+| `WithDirPerm(perm)` | 自动创建目录的权限（默认 0755） |
+| `WithLocalKeyFunc(fn)` | key 变换函数 |
+| `WithAtomicWrite()` | 启用原子写入 |
 
-// Type-assert to access presigning
-if p, ok := fs.(virefs.Presigner); ok {
-    req, _ := p.PresignGet(ctx, "report.pdf", 15*time.Minute)
-    fmt.Println(req.URL)    // presigned download URL
-    fmt.Println(req.Method) // "GET"
+### ObjectFS
 
-    put, _ := p.PresignPut(ctx, "upload.zip", 30*time.Minute)
-    fmt.Println(put.URL)    // presigned upload URL
-}
-```
+| Option | 说明 |
+|---|---|
+| `WithPrefix(p)` | 所有 key 添加前缀 |
+| `WithObjectKeyFunc(fn)` | key 变换函数 |
+| `WithPresignClient(pc)` | 启用预签名 URL |
+| `WithBaseURL(url)` | Access 公开 URL 基地址 |
+| `WithAccessExpires(d)` | Access 预签名默认过期时间 |
+| `WithAccessFunc(fn)` | 自定义 Access URL 生成 |
+
+### Put
+
+| Option | 说明 |
+|---|---|
+| `WithContentType(ct)` | 设置 MIME 类型 |
+| `WithMetadata(m)` | 设置自定义元数据 |
 
 ## License
 

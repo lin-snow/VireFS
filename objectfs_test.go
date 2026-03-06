@@ -19,11 +19,17 @@ import (
 
 // fakeS3 is an in-memory S3 implementation for testing.
 type fakeS3 struct {
-	objects map[string][]byte
+	objects      map[string][]byte
+	contentTypes map[string]string
+	metadata     map[string]map[string]string
 }
 
 func newFakeS3() *fakeS3 {
-	return &fakeS3{objects: make(map[string][]byte)}
+	return &fakeS3{
+		objects:      make(map[string][]byte),
+		contentTypes: make(map[string]string),
+		metadata:     make(map[string]map[string]string),
+	}
 }
 
 func (f *fakeS3) PutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
@@ -31,8 +37,32 @@ func (f *fakeS3) PutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*
 	if err != nil {
 		return nil, err
 	}
-	f.objects[aws.ToString(in.Key)] = data
+	key := aws.ToString(in.Key)
+	f.objects[key] = data
+	if in.ContentType != nil {
+		f.contentTypes[key] = aws.ToString(in.ContentType)
+	}
+	if in.Metadata != nil {
+		f.metadata[key] = in.Metadata
+	}
 	return &s3.PutObjectOutput{}, nil
+}
+
+func (f *fakeS3) CopyObject(_ context.Context, in *s3.CopyObjectInput, _ ...func(*s3.Options)) (*s3.CopyObjectOutput, error) {
+	src := aws.ToString(in.CopySource)
+	parts := strings.SplitN(src, "/", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid copy source: %s", src)
+	}
+	srcKey := parts[1]
+	data, ok := f.objects[srcKey]
+	if !ok {
+		return nil, &types.NoSuchKey{Message: aws.String("no such key: " + srcKey)}
+	}
+	dstKey := aws.ToString(in.Key)
+	f.objects[dstKey] = make([]byte, len(data))
+	copy(f.objects[dstKey], data)
+	return &s3.CopyObjectOutput{}, nil
 }
 
 func (f *fakeS3) GetObject(_ context.Context, in *s3.GetObjectInput, _ ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
@@ -422,5 +452,105 @@ func TestObjectFS_AccessFunc_WithKeyFunc(t *testing.T) {
 	want := "https://cdn.example.com/data/v2/config.yaml"
 	if info.URL != want {
 		t.Fatalf("AccessFunc should receive full s3 key, got URL %q, want %q", info.URL, want)
+	}
+}
+
+func TestObjectFS_PutWithContentType(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket")
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "image.png", strings.NewReader("png-data"), WithContentType("image/png"))
+
+	if ct := fake.contentTypes["image.png"]; ct != "image/png" {
+		t.Fatalf("ContentType = %q, want %q", ct, "image/png")
+	}
+}
+
+func TestObjectFS_PutWithMetadata(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket")
+	ctx := context.Background()
+
+	meta := map[string]string{"author": "test", "version": "1"}
+	_ = fs.Put(ctx, "doc.pdf", strings.NewReader("pdf"), WithMetadata(meta))
+
+	got := fake.metadata["doc.pdf"]
+	if got["author"] != "test" || got["version"] != "1" {
+		t.Fatalf("Metadata = %v, want %v", got, meta)
+	}
+}
+
+func TestObjectFS_Copy(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket", WithPrefix("pfx/"))
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "src.txt", strings.NewReader("content"))
+
+	if err := fs.Copy(ctx, "src.txt", "dst.txt"); err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+
+	if _, ok := fake.objects["pfx/dst.txt"]; !ok {
+		t.Fatal("expected dst object after Copy")
+	}
+
+	rc, err := fs.Get(ctx, "dst.txt")
+	if err != nil {
+		t.Fatalf("Get dst: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "content" {
+		t.Fatalf("Copy content = %q, want %q", data, "content")
+	}
+}
+
+func TestObjectFS_Exists(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket")
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "yes.txt", strings.NewReader("y"))
+
+	ok, err := Exists(ctx, fs, "yes.txt")
+	if err != nil {
+		t.Fatalf("Exists: %v", err)
+	}
+	if !ok {
+		t.Fatal("Exists should return true for existing key")
+	}
+
+	ok, err = Exists(ctx, fs, "no.txt")
+	if err != nil {
+		t.Fatalf("Exists missing: %v", err)
+	}
+	if ok {
+		t.Fatal("Exists should return false for missing key")
+	}
+}
+
+func TestObjectFS_CrossBackendCopy(t *testing.T) {
+	fake1 := newFakeS3()
+	fake2 := newFakeS3()
+	src := NewObjectFS(fake1, "src-bucket")
+	dst := NewObjectFS(fake2, "dst-bucket")
+	ctx := context.Background()
+
+	_ = src.Put(ctx, "file.txt", strings.NewReader("cross"))
+
+	if err := Copy(ctx, src, "file.txt", dst, "file.txt"); err != nil {
+		t.Fatalf("Cross-backend Copy: %v", err)
+	}
+
+	rc, err := dst.Get(ctx, "file.txt")
+	if err != nil {
+		t.Fatalf("Get from dst: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "cross" {
+		t.Fatalf("Cross copy content = %q, want %q", data, "cross")
 	}
 }

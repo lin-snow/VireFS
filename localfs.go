@@ -29,12 +29,20 @@ func WithLocalKeyFunc(fn KeyFunc) LocalOption {
 	return func(l *LocalFS) { l.keyFunc = fn }
 }
 
+// WithAtomicWrite enables atomic writes: Put writes to a temporary file in
+// the same directory and then renames it to the target path. This prevents
+// data corruption from concurrent writes to the same key.
+func WithAtomicWrite() LocalOption {
+	return func(l *LocalFS) { l.atomicWrite = true }
+}
+
 // LocalFS implements FS backed by a local directory.
 type LocalFS struct {
-	root       string
-	dirPerm    os.FileMode
-	createRoot bool
-	keyFunc    KeyFunc
+	root        string
+	dirPerm     os.FileMode
+	createRoot  bool
+	keyFunc     KeyFunc
+	atomicWrite bool
 }
 
 // NewLocalFS creates a LocalFS rooted at the given directory.
@@ -89,20 +97,49 @@ func (l *LocalFS) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	return f, nil
 }
 
-func (l *LocalFS) Put(_ context.Context, key string, r io.Reader) error {
+func (l *LocalFS) Put(_ context.Context, key string, r io.Reader, _ ...PutOption) error {
 	p, err := l.fullPath(key)
 	if err != nil {
 		return &OpError{Op: "Put", Key: key, Err: err}
 	}
-	if err := os.MkdirAll(filepath.Dir(p), l.dirPerm); err != nil {
+	dir := filepath.Dir(p)
+	if err := os.MkdirAll(dir, l.dirPerm); err != nil {
 		return &OpError{Op: "Put", Key: key, Err: err}
 	}
+
+	if l.atomicWrite {
+		return l.putAtomic(p, dir, key, r)
+	}
+
 	f, err := os.Create(p)
 	if err != nil {
 		return &OpError{Op: "Put", Key: key, Err: err}
 	}
 	defer f.Close()
 	if _, err := io.Copy(f, r); err != nil {
+		return &OpError{Op: "Put", Key: key, Err: err}
+	}
+	return nil
+}
+
+func (l *LocalFS) putAtomic(target, dir, key string, r io.Reader) error {
+	tmp, err := os.CreateTemp(dir, ".virefs-tmp-*")
+	if err != nil {
+		return &OpError{Op: "Put", Key: key, Err: err}
+	}
+	tmpName := tmp.Name()
+
+	if _, err := io.Copy(tmp, r); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return &OpError{Op: "Put", Key: key, Err: err}
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return &OpError{Op: "Put", Key: key, Err: err}
+	}
+	if err := os.Rename(tmpName, target); err != nil {
+		os.Remove(tmpName)
 		return &OpError{Op: "Put", Key: key, Err: err}
 	}
 	return nil
@@ -178,6 +215,36 @@ func (l *LocalFS) Access(_ context.Context, key string) (*AccessInfo, error) {
 		return nil, &OpError{Op: "Access", Key: key, Err: err}
 	}
 	return &AccessInfo{Path: p}, nil
+}
+
+// Copy implements Copier for same-backend file copy.
+func (l *LocalFS) Copy(_ context.Context, srcKey, dstKey string) error {
+	srcPath, err := l.fullPath(srcKey)
+	if err != nil {
+		return &OpError{Op: "Copy", Key: srcKey, Err: err}
+	}
+	dstPath, err := l.fullPath(dstKey)
+	if err != nil {
+		return &OpError{Op: "Copy", Key: dstKey, Err: err}
+	}
+	sf, err := os.Open(srcPath)
+	if err != nil {
+		return &OpError{Op: "Copy", Key: srcKey, Err: mapOSError(err)}
+	}
+	defer sf.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dstPath), l.dirPerm); err != nil {
+		return &OpError{Op: "Copy", Key: dstKey, Err: err}
+	}
+	df, err := os.Create(dstPath)
+	if err != nil {
+		return &OpError{Op: "Copy", Key: dstKey, Err: err}
+	}
+	defer df.Close()
+	if _, err := io.Copy(df, sf); err != nil {
+		return &OpError{Op: "Copy", Key: dstKey, Err: err}
+	}
+	return nil
 }
 
 // mapOSError converts common os errors to virefs sentinel errors.

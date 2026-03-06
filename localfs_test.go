@@ -184,3 +184,137 @@ func TestLocalFS_TraversalRejected(t *testing.T) {
 		t.Fatalf("traversal error = %v, want ErrInvalidKey", err)
 	}
 }
+
+func TestLocalFS_AtomicWrite(t *testing.T) {
+	dir := t.TempDir()
+	fs := NewLocalFS(dir, WithAtomicWrite())
+	ctx := context.Background()
+
+	if err := fs.Put(ctx, "atomic.txt", strings.NewReader("safe")); err != nil {
+		t.Fatalf("AtomicWrite Put: %v", err)
+	}
+	rc, err := fs.Get(ctx, "atomic.txt")
+	if err != nil {
+		t.Fatalf("AtomicWrite Get: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "safe" {
+		t.Fatalf("AtomicWrite content = %q, want %q", data, "safe")
+	}
+}
+
+func TestLocalFS_AtomicWriteNested(t *testing.T) {
+	dir := t.TempDir()
+	fs := NewLocalFS(dir, WithAtomicWrite())
+	ctx := context.Background()
+
+	if err := fs.Put(ctx, "a/b/c.txt", strings.NewReader("deep")); err != nil {
+		t.Fatalf("AtomicWrite nested Put: %v", err)
+	}
+	rc, err := fs.Get(ctx, "a/b/c.txt")
+	if err != nil {
+		t.Fatalf("AtomicWrite nested Get: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "deep" {
+		t.Fatalf("AtomicWrite nested content = %q, want %q", data, "deep")
+	}
+}
+
+func TestLocalFS_Copy(t *testing.T) {
+	dir := t.TempDir()
+	fs := NewLocalFS(dir)
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "original.txt", strings.NewReader("data"))
+
+	if err := fs.Copy(ctx, "original.txt", "copied.txt"); err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+
+	rc, err := fs.Get(ctx, "copied.txt")
+	if err != nil {
+		t.Fatalf("Get copied: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "data" {
+		t.Fatalf("Copy content = %q, want %q", data, "data")
+	}
+
+	rc, err = fs.Get(ctx, "original.txt")
+	if err != nil {
+		t.Fatalf("original should still exist: %v", err)
+	}
+	rc.Close()
+}
+
+func TestLocalFS_CopyNested(t *testing.T) {
+	dir := t.TempDir()
+	fs := NewLocalFS(dir)
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "src/file.txt", strings.NewReader("nested"))
+
+	if err := fs.Copy(ctx, "src/file.txt", "dst/dir/file.txt"); err != nil {
+		t.Fatalf("Copy nested: %v", err)
+	}
+
+	rc, err := fs.Get(ctx, "dst/dir/file.txt")
+	if err != nil {
+		t.Fatalf("Get nested copy: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "nested" {
+		t.Fatalf("Nested copy content = %q, want %q", data, "nested")
+	}
+}
+
+func TestLocalFS_Exists(t *testing.T) {
+	dir := t.TempDir()
+	fs := NewLocalFS(dir)
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "exists.txt", strings.NewReader("yes"))
+
+	ok, err := Exists(ctx, fs, "exists.txt")
+	if err != nil {
+		t.Fatalf("Exists: %v", err)
+	}
+	if !ok {
+		t.Fatal("Exists should return true")
+	}
+
+	ok, err = Exists(ctx, fs, "nope.txt")
+	if err != nil {
+		t.Fatalf("Exists missing: %v", err)
+	}
+	if ok {
+		t.Fatal("Exists should return false for missing key")
+	}
+}
+
+func TestLocalFS_CopyHelper_SameBackend(t *testing.T) {
+	dir := t.TempDir()
+	fs := NewLocalFS(dir)
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "a.txt", strings.NewReader("hello"))
+
+	if err := Copy(ctx, fs, "a.txt", fs, "b.txt"); err != nil {
+		t.Fatalf("Copy helper same backend: %v", err)
+	}
+
+	rc, err := fs.Get(ctx, "b.txt")
+	if err != nil {
+		t.Fatalf("Get b.txt: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "hello" {
+		t.Fatalf("content = %q, want %q", data, "hello")
+	}
+}

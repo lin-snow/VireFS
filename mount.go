@@ -73,12 +73,12 @@ func (mt *MountTable) Get(ctx context.Context, key string) (io.ReadCloser, error
 }
 
 // Put implements FS.
-func (mt *MountTable) Put(ctx context.Context, key string, r io.Reader) error {
+func (mt *MountTable) Put(ctx context.Context, key string, r io.Reader, opts ...PutOption) error {
 	fs, sub, err := mt.resolve(key)
 	if err != nil {
 		return err
 	}
-	return fs.Put(ctx, sub, r)
+	return fs.Put(ctx, sub, r, opts...)
 }
 
 // Delete implements FS.

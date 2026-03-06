@@ -23,6 +23,7 @@ type S3API interface {
 	DeleteObject(ctx context.Context, params *s3.DeleteObjectInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
 	HeadObject(ctx context.Context, params *s3.HeadObjectInput, optFns ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
 	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
+	CopyObject(ctx context.Context, params *s3.CopyObjectInput, optFns ...func(*s3.Options)) (*s3.CopyObjectOutput, error)
 }
 
 // PresignAPI is the subset of *s3.PresignClient that ObjectFS needs for
@@ -142,16 +143,24 @@ func (o *ObjectFS) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	return out.Body, nil
 }
 
-func (o *ObjectFS) Put(ctx context.Context, key string, r io.Reader) error {
+func (o *ObjectFS) Put(ctx context.Context, key string, r io.Reader, opts ...PutOption) error {
 	s3k, err := o.s3Key(key)
 	if err != nil {
 		return &OpError{Op: "Put", Key: key, Err: err}
 	}
-	_, err = o.client.PutObject(ctx, &s3.PutObjectInput{
+	cfg := BuildPutConfig(opts)
+	input := &s3.PutObjectInput{
 		Bucket: aws.String(o.bucket),
 		Key:    aws.String(s3k),
 		Body:   r,
-	})
+	}
+	if cfg.ContentType != "" {
+		input.ContentType = aws.String(cfg.ContentType)
+	}
+	if len(cfg.Metadata) > 0 {
+		input.Metadata = cfg.Metadata
+	}
+	_, err = o.client.PutObject(ctx, input)
 	if err != nil {
 		return &OpError{Op: "Put", Key: key, Err: mapS3Error(err)}
 	}
@@ -320,8 +329,30 @@ func (o *ObjectFS) Access(ctx context.Context, key string) (*AccessInfo, error) 
 	return nil, &OpError{Op: "Access", Key: key, Err: fmt.Errorf("%w: set WithAccessFunc, WithPresignClient, or WithBaseURL", ErrNotSupported)}
 }
 
-// Compile-time check: ObjectFS implements Presigner.
+// Copy implements Copier using S3 CopyObject for efficient same-bucket copies.
+func (o *ObjectFS) Copy(ctx context.Context, srcKey, dstKey string) error {
+	srcS3k, err := o.s3Key(srcKey)
+	if err != nil {
+		return &OpError{Op: "Copy", Key: srcKey, Err: err}
+	}
+	dstS3k, err := o.s3Key(dstKey)
+	if err != nil {
+		return &OpError{Op: "Copy", Key: dstKey, Err: err}
+	}
+	_, err = o.client.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:     aws.String(o.bucket),
+		CopySource: aws.String(o.bucket + "/" + srcS3k),
+		Key:        aws.String(dstS3k),
+	})
+	if err != nil {
+		return &OpError{Op: "Copy", Key: srcKey + " -> " + dstKey, Err: mapS3Error(err)}
+	}
+	return nil
+}
+
+// Compile-time checks.
 var _ Presigner = (*ObjectFS)(nil)
+var _ Copier = (*ObjectFS)(nil)
 
 // mapS3Error converts common S3 error types to virefs sentinel errors.
 func mapS3Error(err error) error {
