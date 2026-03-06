@@ -74,6 +74,37 @@ func TestMountTable_ListRoot(t *testing.T) {
 	}
 }
 
+func TestMountTable_Access(t *testing.T) {
+	dir := t.TempDir()
+	local := NewLocalFS(dir)
+	fake := newFakeS3()
+	obj := NewObjectFS(fake, "bucket", WithBaseURL("https://cdn.example.com"))
+
+	mt := NewMountTable()
+	_ = mt.Mount("local", local)
+	_ = mt.Mount("s3", obj)
+	ctx := context.Background()
+
+	info, err := mt.Access(ctx, "local/readme.txt")
+	if err != nil {
+		t.Fatalf("Access local: %v", err)
+	}
+	if info.Path == "" {
+		t.Fatal("Access local should return Path")
+	}
+
+	info, err = mt.Access(ctx, "s3/img/logo.png")
+	if err != nil {
+		t.Fatalf("Access s3: %v", err)
+	}
+	if info.URL == "" {
+		t.Fatal("Access s3 should return URL")
+	}
+	if !strings.Contains(info.URL, "img/logo.png") {
+		t.Fatalf("Access s3 URL = %q, want to contain key", info.URL)
+	}
+}
+
 func TestMountTable_InvalidPrefix(t *testing.T) {
 	mt := NewMountTable()
 	if err := mt.Mount("a/b", NewLocalFS(t.TempDir())); err == nil {

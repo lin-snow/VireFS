@@ -172,6 +172,14 @@ func (l *LocalFS) Stat(_ context.Context, key string) (*FileInfo, error) {
 	}, nil
 }
 
+func (l *LocalFS) Access(_ context.Context, key string) (*AccessInfo, error) {
+	p, err := l.fullPath(key)
+	if err != nil {
+		return nil, &OpError{Op: "Access", Key: key, Err: err}
+	}
+	return &AccessInfo{Path: p}, nil
+}
+
 // mapOSError converts common os errors to virefs sentinel errors.
 func mapOSError(err error) error {
 	if os.IsNotExist(err) {

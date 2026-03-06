@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
@@ -200,5 +203,165 @@ func TestObjectFS_NotFound(t *testing.T) {
 	_, err = fs.Stat(ctx, "nope.txt")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Stat missing key error = %v, want ErrNotFound", err)
+	}
+}
+
+// fakePresign implements PresignAPI for testing.
+type fakePresign struct{}
+
+func (fp *fakePresign) PresignGetObject(_ context.Context, in *s3.GetObjectInput, opts ...func(*s3.PresignOptions)) (*v4.PresignedHTTPRequest, error) {
+	var po s3.PresignOptions
+	for _, fn := range opts {
+		fn(&po)
+	}
+	return &v4.PresignedHTTPRequest{
+		URL:          fmt.Sprintf("https://s3.example.com/%s/%s?expires=%s", aws.ToString(in.Bucket), aws.ToString(in.Key), po.Expires),
+		Method:       "GET",
+		SignedHeader: http.Header{"Host": []string{"s3.example.com"}},
+	}, nil
+}
+
+func (fp *fakePresign) PresignPutObject(_ context.Context, in *s3.PutObjectInput, opts ...func(*s3.PresignOptions)) (*v4.PresignedHTTPRequest, error) {
+	var po s3.PresignOptions
+	for _, fn := range opts {
+		fn(&po)
+	}
+	return &v4.PresignedHTTPRequest{
+		URL:          fmt.Sprintf("https://s3.example.com/%s/%s?expires=%s", aws.ToString(in.Bucket), aws.ToString(in.Key), po.Expires),
+		Method:       "PUT",
+		SignedHeader: http.Header{"Host": []string{"s3.example.com"}},
+	}, nil
+}
+
+func TestObjectFS_PresignGet(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket", WithPrefix("pfx/"), WithPresignClient(&fakePresign{}))
+	ctx := context.Background()
+
+	req, err := fs.PresignGet(ctx, "report.pdf", 15*time.Minute)
+	if err != nil {
+		t.Fatalf("PresignGet: %v", err)
+	}
+	if req.Method != "GET" {
+		t.Fatalf("PresignGet method = %q, want GET", req.Method)
+	}
+	if !strings.Contains(req.URL, "pfx/report.pdf") {
+		t.Fatalf("PresignGet URL should contain prefixed key, got %q", req.URL)
+	}
+	if !strings.Contains(req.URL, "15m0s") {
+		t.Fatalf("PresignGet URL should contain expiry, got %q", req.URL)
+	}
+}
+
+func TestObjectFS_PresignPut(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket", WithPresignClient(&fakePresign{}))
+	ctx := context.Background()
+
+	req, err := fs.PresignPut(ctx, "upload.zip", 30*time.Minute)
+	if err != nil {
+		t.Fatalf("PresignPut: %v", err)
+	}
+	if req.Method != "PUT" {
+		t.Fatalf("PresignPut method = %q, want PUT", req.Method)
+	}
+	if !strings.Contains(req.URL, "upload.zip") {
+		t.Fatalf("PresignPut URL should contain key, got %q", req.URL)
+	}
+}
+
+func TestObjectFS_PresignWithKeyFunc(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket", WithPrefix("data/"),
+		WithObjectKeyFunc(func(key string) string { return "v2/" + key }),
+		WithPresignClient(&fakePresign{}),
+	)
+	ctx := context.Background()
+
+	req, err := fs.PresignGet(ctx, "file.txt", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("PresignGet with KeyFunc: %v", err)
+	}
+	if !strings.Contains(req.URL, "data/v2/file.txt") {
+		t.Fatalf("PresignGet URL should contain transformed key, got %q", req.URL)
+	}
+}
+
+func TestObjectFS_PresignWithoutClient(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket")
+	ctx := context.Background()
+
+	_, err := fs.PresignGet(ctx, "file.txt", 5*time.Minute)
+	if !errors.Is(err, ErrNotSupported) {
+		t.Fatalf("PresignGet without client error = %v, want ErrNotSupported", err)
+	}
+
+	_, err = fs.PresignPut(ctx, "file.txt", 5*time.Minute)
+	if !errors.Is(err, ErrNotSupported) {
+		t.Fatalf("PresignPut without client error = %v, want ErrNotSupported", err)
+	}
+}
+
+func TestObjectFS_AccessWithPresign(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket", WithPrefix("pfx/"), WithPresignClient(&fakePresign{}))
+	ctx := context.Background()
+
+	info, err := fs.Access(ctx, "report.pdf")
+	if err != nil {
+		t.Fatalf("Access with presign: %v", err)
+	}
+	if info.URL == "" {
+		t.Fatal("Access.URL should be non-empty")
+	}
+	if info.Path != "" {
+		t.Fatal("Access.Path should be empty for ObjectFS")
+	}
+	if !strings.Contains(info.URL, "pfx/report.pdf") {
+		t.Fatalf("Access.URL should contain prefixed key, got %q", info.URL)
+	}
+}
+
+func TestObjectFS_AccessWithBaseURL(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket", WithPrefix("data/"), WithBaseURL("https://cdn.example.com"))
+	ctx := context.Background()
+
+	info, err := fs.Access(ctx, "img/logo.png")
+	if err != nil {
+		t.Fatalf("Access with base URL: %v", err)
+	}
+	want := "https://cdn.example.com/data/img/logo.png"
+	if info.URL != want {
+		t.Fatalf("Access.URL = %q, want %q", info.URL, want)
+	}
+}
+
+func TestObjectFS_AccessPresignPriority(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket",
+		WithPresignClient(&fakePresign{}),
+		WithBaseURL("https://cdn.example.com"),
+	)
+	ctx := context.Background()
+
+	info, err := fs.Access(ctx, "file.txt")
+	if err != nil {
+		t.Fatalf("Access: %v", err)
+	}
+	if strings.HasPrefix(info.URL, "https://cdn.example.com") {
+		t.Fatalf("presign client should take priority over base URL, got %q", info.URL)
+	}
+}
+
+func TestObjectFS_AccessNotConfigured(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket")
+	ctx := context.Background()
+
+	_, err := fs.Access(ctx, "file.txt")
+	if !errors.Is(err, ErrNotSupported) {
+		t.Fatalf("Access without config error = %v, want ErrNotSupported", err)
 	}
 }

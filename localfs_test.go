@@ -133,6 +133,44 @@ func TestLocalFS_WithKeyFunc(t *testing.T) {
 	}
 }
 
+func TestLocalFS_Access(t *testing.T) {
+	dir := t.TempDir()
+	fs := NewLocalFS(dir)
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "doc/readme.txt", strings.NewReader("hello"))
+
+	info, err := fs.Access(ctx, "doc/readme.txt")
+	if err != nil {
+		t.Fatalf("Access: %v", err)
+	}
+	if info.Path == "" {
+		t.Fatal("Access.Path should be non-empty for LocalFS")
+	}
+	if info.URL != "" {
+		t.Fatal("Access.URL should be empty for LocalFS")
+	}
+	if !strings.HasSuffix(info.Path, "doc/readme.txt") {
+		t.Fatalf("Access.Path = %q, want suffix doc/readme.txt", info.Path)
+	}
+}
+
+func TestLocalFS_AccessWithKeyFunc(t *testing.T) {
+	dir := t.TempDir()
+	fs := NewLocalFS(dir, WithLocalKeyFunc(func(key string) string {
+		return "v2/" + key
+	}))
+	ctx := context.Background()
+
+	info, err := fs.Access(ctx, "file.txt")
+	if err != nil {
+		t.Fatalf("Access with KeyFunc: %v", err)
+	}
+	if !strings.HasSuffix(info.Path, "v2/file.txt") {
+		t.Fatalf("Access.Path = %q, want suffix v2/file.txt", info.Path)
+	}
+}
+
 func TestLocalFS_TraversalRejected(t *testing.T) {
 	dir := t.TempDir()
 	fs := NewLocalFS(dir)

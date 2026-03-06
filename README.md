@@ -26,6 +26,7 @@ type FS interface {
     Delete(ctx context.Context, key string) error
     List(ctx context.Context, prefix string) (*ListResult, error)
     Stat(ctx context.Context, key string) (*FileInfo, error)
+    Access(ctx context.Context, key string) (*AccessInfo, error)
 }
 ```
 
@@ -42,6 +43,7 @@ type FS interface {
 | `ErrNotFound` | Key does not exist |
 | `ErrInvalidKey` | Key contains illegal patterns (e.g. `..`) |
 | `ErrAlreadyExist` | Resource already exists (reserved) |
+| `ErrNotSupported` | Operation not supported by this backend |
 
 All backend errors are wrapped in `*OpError{Op, Key, Err}` for easy debugging.
 
@@ -99,6 +101,55 @@ objFS := virefs.NewObjectFS(client, "bucket", virefs.WithObjectKeyFunc(func(key 
     return "v2/" + key
 }))
 // Get("config.yaml") fetches S3 key "v2/config.yaml"
+```
+
+### Access — get a path or URL for any file
+
+`Access` is part of the core `FS` interface. It returns backend-specific access info: a local file path for `LocalFS`, or a URL for `ObjectFS`.
+
+```go
+// LocalFS → returns absolute file path
+local := virefs.NewLocalFS("/data/files")
+info, _ := local.Access(ctx, "report.pdf")
+fmt.Println(info.Path) // "/data/files/report.pdf"
+
+// ObjectFS with presign client → returns presigned URL (default 15min expiry)
+objFS := virefs.NewObjectFS(client, "bucket",
+    virefs.WithPresignClient(s3.NewPresignClient(client)),
+    virefs.WithAccessExpires(30*time.Minute),
+)
+info, _ = objFS.Access(ctx, "report.pdf")
+fmt.Println(info.URL) // "https://bucket.s3...?X-Amz-Signature=..."
+
+// ObjectFS with base URL (no presign) → returns plain public URL
+cdnFS := virefs.NewObjectFS(client, "bucket",
+    virefs.WithBaseURL("https://cdn.example.com"),
+    virefs.WithPrefix("assets/"),
+)
+info, _ = cdnFS.Access(ctx, "logo.png")
+fmt.Println(info.URL) // "https://cdn.example.com/assets/logo.png"
+```
+
+### Presigned URLs (S3 only)
+
+`ObjectFS` implements the optional `Presigner` interface when a presign client is provided. Use a type assertion to access it.
+
+```go
+presignClient := s3.NewPresignClient(client)
+fs := virefs.NewObjectFS(client, "my-bucket",
+    virefs.WithPrefix("uploads/"),
+    virefs.WithPresignClient(presignClient),
+)
+
+// Type-assert to access presigning
+if p, ok := fs.(virefs.Presigner); ok {
+    req, _ := p.PresignGet(ctx, "report.pdf", 15*time.Minute)
+    fmt.Println(req.URL)    // presigned download URL
+    fmt.Println(req.Method) // "GET"
+
+    put, _ := p.PresignPut(ctx, "upload.zip", 30*time.Minute)
+    fmt.Println(put.URL)    // presigned upload URL
+}
 ```
 
 ## License

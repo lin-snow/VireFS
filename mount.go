@@ -118,3 +118,12 @@ func (mt *MountTable) Stat(ctx context.Context, key string) (*FileInfo, error) {
 	}
 	return fs.Stat(ctx, sub)
 }
+
+// Access implements FS.
+func (mt *MountTable) Access(ctx context.Context, key string) (*AccessInfo, error) {
+	fs, sub, err := mt.resolve(key)
+	if err != nil {
+		return nil, err
+	}
+	return fs.Access(ctx, sub)
+}
