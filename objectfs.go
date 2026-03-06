@@ -68,6 +68,16 @@ func WithAccessExpires(d time.Duration) ObjectOption {
 	return func(o *ObjectFS) { o.accessExpires = d }
 }
 
+// WithAccessFunc sets a custom function for Access URL generation.
+// The function receives the fully resolved S3 key (after CleanKey + KeyFunc +
+// basePrefix) and returns an AccessInfo. This is useful for CDN domains,
+// custom URL schemes, or per-file-type routing.
+//
+// When set, AccessFunc takes priority over presign client and base URL.
+func WithAccessFunc(fn AccessFunc) ObjectOption {
+	return func(o *ObjectFS) { o.accessFunc = fn }
+}
+
 // ObjectFS implements FS backed by an S3-compatible object store.
 // It also implements the optional Presigner interface when a PresignAPI client
 // is provided via WithPresignClient.
@@ -79,6 +89,7 @@ type ObjectFS struct {
 	presignClient PresignAPI
 	baseURL       string
 	accessExpires time.Duration
+	accessFunc    AccessFunc
 }
 
 const defaultAccessExpires = 15 * time.Minute
@@ -273,10 +284,16 @@ func (o *ObjectFS) PresignPut(ctx context.Context, key string, expires time.Dura
 	}, nil
 }
 
+// Access returns an AccessInfo for the given key.
+// Priority: AccessFunc > PresignClient > BaseURL > ErrNotSupported.
 func (o *ObjectFS) Access(ctx context.Context, key string) (*AccessInfo, error) {
 	s3k, err := o.s3Key(key)
 	if err != nil {
 		return nil, &OpError{Op: "Access", Key: key, Err: err}
+	}
+
+	if o.accessFunc != nil {
+		return o.accessFunc(s3k), nil
 	}
 
 	if o.presignClient != nil {
@@ -300,7 +317,7 @@ func (o *ObjectFS) Access(ctx context.Context, key string) (*AccessInfo, error) 
 		return &AccessInfo{URL: o.baseURL + "/" + s3k}, nil
 	}
 
-	return nil, &OpError{Op: "Access", Key: key, Err: fmt.Errorf("%w: set WithPresignClient or WithBaseURL", ErrNotSupported)}
+	return nil, &OpError{Op: "Access", Key: key, Err: fmt.Errorf("%w: set WithAccessFunc, WithPresignClient, or WithBaseURL", ErrNotSupported)}
 }
 
 // Compile-time check: ObjectFS implements Presigner.

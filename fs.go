@@ -91,6 +91,11 @@ type Presigner interface {
 // no leading/trailing slashes). The returned string is used as-is.
 type KeyFunc func(key string) string
 
+// AccessFunc builds an AccessInfo for a fully resolved storage key
+// (after CleanKey + KeyFunc + basePrefix). Use it to implement custom URL
+// schemes such as CDN domains or per-file-type routing.
+type AccessFunc func(key string) *AccessInfo
+
 // OpError wraps a backend error with operation context.
 type OpError struct {
 	Op  string // e.g. "Get", "Put"

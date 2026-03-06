@@ -122,12 +122,26 @@ info, _ = objFS.Access(ctx, "report.pdf")
 fmt.Println(info.URL) // "https://bucket.s3...?X-Amz-Signature=..."
 
 // ObjectFS with base URL (no presign) → returns plain public URL
-cdnFS := virefs.NewObjectFS(client, "bucket",
-    virefs.WithBaseURL("https://cdn.example.com"),
+plainFS := virefs.NewObjectFS(client, "bucket",
+    virefs.WithBaseURL("https://my-bucket.s3.us-east-1.amazonaws.com"),
     virefs.WithPrefix("assets/"),
 )
-info, _ = cdnFS.Access(ctx, "logo.png")
-fmt.Println(info.URL) // "https://cdn.example.com/assets/logo.png"
+info, _ = plainFS.Access(ctx, "logo.png")
+fmt.Println(info.URL) // "https://my-bucket.s3.us-east-1.amazonaws.com/assets/logo.png"
+```
+
+For full control (CDN, multi-domain routing, etc.), use `WithAccessFunc`. It receives the fully resolved S3 key and takes priority over presign client and base URL:
+
+```go
+cdnFS := virefs.NewObjectFS(client, "bucket",
+    virefs.WithPrefix("assets/"),
+    virefs.WithPresignClient(presignClient), // still available via Presigner interface
+    virefs.WithAccessFunc(func(key string) *virefs.AccessInfo {
+        return &virefs.AccessInfo{URL: "https://cdn.example.com/" + key}
+    }),
+)
+info, _ := cdnFS.Access(ctx, "img/logo.png")
+fmt.Println(info.URL) // "https://cdn.example.com/assets/img/logo.png"
 ```
 
 ### Presigned URLs (S3 only)

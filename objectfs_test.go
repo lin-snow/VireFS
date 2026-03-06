@@ -365,3 +365,62 @@ func TestObjectFS_AccessNotConfigured(t *testing.T) {
 		t.Fatalf("Access without config error = %v, want ErrNotSupported", err)
 	}
 }
+
+func TestObjectFS_AccessFunc_CDN(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket", WithPrefix("assets/"),
+		WithAccessFunc(func(key string) *AccessInfo {
+			return &AccessInfo{URL: "https://cdn.example.com/" + key}
+		}),
+	)
+	ctx := context.Background()
+
+	info, err := fs.Access(ctx, "img/logo.png")
+	if err != nil {
+		t.Fatalf("Access with AccessFunc: %v", err)
+	}
+	want := "https://cdn.example.com/assets/img/logo.png"
+	if info.URL != want {
+		t.Fatalf("Access.URL = %q, want %q", info.URL, want)
+	}
+}
+
+func TestObjectFS_AccessFunc_PriorityOverPresign(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket",
+		WithPresignClient(&fakePresign{}),
+		WithBaseURL("https://s3.example.com"),
+		WithAccessFunc(func(key string) *AccessInfo {
+			return &AccessInfo{URL: "https://cdn.fast.io/" + key}
+		}),
+	)
+	ctx := context.Background()
+
+	info, err := fs.Access(ctx, "file.txt")
+	if err != nil {
+		t.Fatalf("Access: %v", err)
+	}
+	if !strings.HasPrefix(info.URL, "https://cdn.fast.io/") {
+		t.Fatalf("AccessFunc should take priority over presign and baseURL, got %q", info.URL)
+	}
+}
+
+func TestObjectFS_AccessFunc_WithKeyFunc(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket", WithPrefix("data/"),
+		WithObjectKeyFunc(func(key string) string { return "v2/" + key }),
+		WithAccessFunc(func(key string) *AccessInfo {
+			return &AccessInfo{URL: "https://cdn.example.com/" + key}
+		}),
+	)
+	ctx := context.Background()
+
+	info, err := fs.Access(ctx, "config.yaml")
+	if err != nil {
+		t.Fatalf("Access: %v", err)
+	}
+	want := "https://cdn.example.com/data/v2/config.yaml"
+	if info.URL != want {
+		t.Fatalf("AccessFunc should receive full s3 key, got URL %q, want %q", info.URL, want)
+	}
+}
