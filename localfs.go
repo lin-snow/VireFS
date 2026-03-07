@@ -37,6 +37,21 @@ func WithAtomicWrite() LocalOption {
 	return func(l *LocalFS) { l.atomicWrite = true }
 }
 
+// WithLocalAccessFunc sets a custom function for Access URL generation.
+// The function receives the cleaned key (after CleanKey + KeyFunc) and
+// returns an AccessInfo. The returned URL field is merged with the
+// disk Path that LocalFS always provides, so both Path and URL can be
+// set simultaneously.
+//
+// This is useful for mapping virtual paths to HTTP URLs, e.g.:
+//
+//	WithLocalAccessFunc(func(key string) *AccessInfo {
+//	    return &AccessInfo{URL: "https://cdn.example.com/files/" + key}
+//	})
+func WithLocalAccessFunc(fn AccessFunc) LocalOption {
+	return func(l *LocalFS) { l.accessFunc = fn }
+}
+
 // LocalFS implements FS backed by a local directory.
 type LocalFS struct {
 	root        string
@@ -44,6 +59,7 @@ type LocalFS struct {
 	createRoot  bool
 	keyFunc     KeyFunc
 	atomicWrite bool
+	accessFunc  AccessFunc
 }
 
 // NewLocalFS creates a LocalFS rooted at the given directory.
@@ -232,7 +248,28 @@ func (l *LocalFS) Stat(ctx context.Context, key string) (*FileInfo, error) {
 	}, nil
 }
 
+// Exists implements FS.
+func (l *LocalFS) Exists(ctx context.Context, key string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, &OpError{Op: "Exists", Key: key, Err: err}
+	}
+	p, err := l.fullPath(key)
+	if err != nil {
+		return false, &OpError{Op: "Exists", Key: key, Err: err}
+	}
+	_, err = os.Stat(p)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, &OpError{Op: "Exists", Key: key, Err: err}
+}
+
 // Access implements FS.
+// When an AccessFunc is configured, the returned AccessInfo contains both
+// the absolute disk Path and any URL produced by the AccessFunc.
 func (l *LocalFS) Access(ctx context.Context, key string) (*AccessInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, &OpError{Op: "Access", Key: key, Err: err}
@@ -241,7 +278,18 @@ func (l *LocalFS) Access(ctx context.Context, key string) (*AccessInfo, error) {
 	if err != nil {
 		return nil, &OpError{Op: "Access", Key: key, Err: err}
 	}
-	return &AccessInfo{Path: p}, nil
+	info := &AccessInfo{Path: p}
+	if l.accessFunc != nil {
+		cleaned, _ := CleanKey(key)
+		if l.keyFunc != nil {
+			cleaned = l.keyFunc(cleaned)
+		}
+		extra := l.accessFunc(cleaned)
+		if extra != nil && extra.URL != "" {
+			info.URL = extra.URL
+		}
+	}
+	return info, nil
 }
 
 // Copy implements Copier for same-backend file copy.

@@ -261,6 +261,25 @@ func (o *ObjectFS) Stat(ctx context.Context, key string) (*FileInfo, error) {
 	}, nil
 }
 
+// Exists implements FS.
+func (o *ObjectFS) Exists(ctx context.Context, key string) (bool, error) {
+	s3k, err := o.s3Key(key)
+	if err != nil {
+		return false, &OpError{Op: "Exists", Key: key, Err: err}
+	}
+	_, err = o.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(o.bucket),
+		Key:    aws.String(s3k),
+	})
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(mapS3Error(err), ErrNotFound) {
+		return false, nil
+	}
+	return false, &OpError{Op: "Exists", Key: key, Err: mapS3Error(err)}
+}
+
 // PresignGet returns a presigned GET URL for the given key.
 // Requires WithPresignClient to have been set; returns ErrNotSupported otherwise.
 func (o *ObjectFS) PresignGet(ctx context.Context, key string, expires time.Duration) (*PresignedRequest, error) {

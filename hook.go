@@ -95,6 +95,11 @@ func (h *hookFS) Stat(ctx context.Context, key string) (*FileInfo, error) {
 	return info, nil
 }
 
+// Exists implements FS.
+func (h *hookFS) Exists(ctx context.Context, key string) (bool, error) {
+	return h.inner.Exists(ctx, key)
+}
+
 // Access implements FS.
 func (h *hookFS) Access(ctx context.Context, key string) (*AccessInfo, error) {
 	return h.inner.Access(ctx, key)
@@ -102,3 +107,80 @@ func (h *hookFS) Access(ctx context.Context, key string) (*AccessInfo, error) {
 
 // Compile-time interface check.
 var _ FS = (*hookFS)(nil)
+
+// ---------------------------------------------------------------------------
+// Middleware chain
+// ---------------------------------------------------------------------------
+
+// Middleware wraps an FS and returns a new FS with additional behaviour.
+// Use [Chain] to compose multiple middlewares.
+type Middleware func(FS) FS
+
+// Chain applies middlewares to fs in order. The first middleware in the list
+// becomes the outermost layer (executed first on every call), and the last
+// middleware is closest to the base FS.
+//
+//	fs := virefs.Chain(baseFS,
+//	    loggingMiddleware,
+//	    metricsMiddleware,
+//	)
+func Chain(fs FS, mw ...Middleware) FS {
+	for _, m := range mw {
+		fs = m(fs)
+	}
+	return fs
+}
+
+// ---------------------------------------------------------------------------
+// BaseFS — embedding helper for writing middlewares
+// ---------------------------------------------------------------------------
+
+// BaseFS forwards every FS method to Inner. Embed it in a custom struct
+// and override only the methods you want to intercept:
+//
+//	type myFS struct {
+//	    virefs.BaseFS
+//	}
+//
+//	func (m *myFS) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+//	    log.Println("get", key)
+//	    return m.Inner.Get(ctx, key)
+//	}
+type BaseFS struct{ Inner FS }
+
+// Get implements FS by forwarding to Inner.
+func (b BaseFS) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	return b.Inner.Get(ctx, key)
+}
+
+// Put implements FS by forwarding to Inner.
+func (b BaseFS) Put(ctx context.Context, key string, r io.Reader, opts ...PutOption) error {
+	return b.Inner.Put(ctx, key, r, opts...)
+}
+
+// Delete implements FS by forwarding to Inner.
+func (b BaseFS) Delete(ctx context.Context, key string) error {
+	return b.Inner.Delete(ctx, key)
+}
+
+// List implements FS by forwarding to Inner.
+func (b BaseFS) List(ctx context.Context, prefix string) (*ListResult, error) {
+	return b.Inner.List(ctx, prefix)
+}
+
+// Stat implements FS by forwarding to Inner.
+func (b BaseFS) Stat(ctx context.Context, key string) (*FileInfo, error) {
+	return b.Inner.Stat(ctx, key)
+}
+
+// Access implements FS by forwarding to Inner.
+func (b BaseFS) Access(ctx context.Context, key string) (*AccessInfo, error) {
+	return b.Inner.Access(ctx, key)
+}
+
+// Exists implements FS by forwarding to Inner.
+func (b BaseFS) Exists(ctx context.Context, key string) (bool, error) {
+	return b.Inner.Exists(ctx, key)
+}
+
+var _ FS = BaseFS{}

@@ -215,6 +215,31 @@ func TestMountTable_Copy_SameBackend(t *testing.T) {
 	}
 }
 
+func TestMountTable_Exists(t *testing.T) {
+	mt := NewMountTable()
+	local := mustNewLocalFS(t, t.TempDir())
+	_ = mt.Mount("fs", local)
+	ctx := context.Background()
+
+	_ = mt.Put(ctx, "fs/found.txt", strings.NewReader("yes"))
+
+	ok, err := mt.Exists(ctx, "fs/found.txt")
+	if err != nil {
+		t.Fatalf("Exists: %v", err)
+	}
+	if !ok {
+		t.Fatal("Exists should return true")
+	}
+
+	ok, err = mt.Exists(ctx, "fs/nope.txt")
+	if err != nil {
+		t.Fatalf("Exists missing: %v", err)
+	}
+	if ok {
+		t.Fatal("Exists should return false")
+	}
+}
+
 func TestMountTable_Copy_CrossBackend(t *testing.T) {
 	mt := NewMountTable()
 	local1 := mustNewLocalFS(t, t.TempDir())

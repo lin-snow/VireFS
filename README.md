@@ -50,6 +50,7 @@ flowchart TB
     objectFS -.-> copier
     localFS -.-> copier
     objectFS -.-> accessFn
+    localFS -.-> accessFn
 ```
 
 ## 核心概念
@@ -71,6 +72,7 @@ type FS interface {
     List(ctx, prefix)                    // 按前缀列举
     Stat(ctx, key)                       // 获取元信息
     Access(ctx, key)                     // 获取外部访问路径/URL
+    Exists(ctx, key)                     // 检查 key 是否存在
 }
 ```
 
@@ -164,19 +166,43 @@ func main() {
 
 ### 对象存储（S3 / MinIO / R2）
 
+**推荐：一步到位的便捷构造器**
+
 ```go
-cfg, err := config.LoadDefaultConfig(ctx)
-if err != nil {
-    log.Fatal(err)
-}
-client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-    o.BaseEndpoint = aws.String("https://s3.example.com")
-    o.UsePathStyle = true
+fs, err := virefs.NewObjectFSFromConfig(ctx, &virefs.S3Config{
+    Provider:  virefs.ProviderMinIO,
+    Endpoint:  "http://localhost:9000",
+    Region:    "us-east-1",
+    AccessKey: "minioadmin",
+    SecretKey: "minioadmin",
+    Bucket:    "my-bucket",
+}, virefs.WithPrefix("uploads/"))
+```
+
+内置 Provider 预设自动处理各平台怪癖：
+
+| Provider | 行为 |
+|---|---|
+| `ProviderAWS` | 默认配置，虚拟主机风格，默认 region `us-east-1` |
+| `ProviderMinIO` | 自动启用 `UsePathStyle` |
+| `ProviderR2` | 自动启用 `UsePathStyle`，默认 region `auto` |
+
+也可以自行构建 `*s3.Client`（完全控制）：
+
+```go
+client, err := virefs.NewS3Client(ctx, &virefs.S3Config{
+    Provider:  virefs.ProviderR2,
+    Endpoint:  "https://<account-id>.r2.cloudflarestorage.com",
+    AccessKey: os.Getenv("R2_ACCESS_KEY"),
+    SecretKey: os.Getenv("R2_SECRET_KEY"),
 })
 
 fs := virefs.NewObjectFS(client, "my-bucket", virefs.WithPrefix("uploads/"))
+```
 
-// 上传并指定 ContentType
+上传并指定 ContentType：
+
+```go
 if err := fs.Put(ctx, "photo.jpg", file,
     virefs.WithContentType("image/jpeg"),
     virefs.WithMetadata(map[string]string{"user": "alice"}),
@@ -200,10 +226,15 @@ err := fs.Put(ctx, "report.pdf", file,
 
 ### Exists — 检查 key 是否存在
 
-包级别便捷函数，内部调用 `Stat`，将 `ErrNotFound` 转为 `false`。
+`Exists` 是 `FS` 接口方法，各后端有最优实现（S3 用 `HeadObject`，本地用 `os.Stat`）。
+也保留了包级别便捷函数：
 
 ```go
-ok, err := virefs.Exists(ctx, fs, "maybe.txt")
+// 接口方法
+ok, err := fs.Exists(ctx, "maybe.txt")
+
+// 包级别函数（等价）
+ok, err = virefs.Exists(ctx, fs, "maybe.txt")
 ```
 
 ### Copy — 文件复制
@@ -222,24 +253,31 @@ err = virefs.Copy(ctx, localFS, "export.csv", objFS, "imports/export.csv",
 
 ### Access — 获取外部访问信息
 
-核心 FS 接口方法，根据后端返回不同内容：
+核心 FS 接口方法，根据后端返回不同内容。`Path` 和 `URL` 可以同时存在。
 
 | 后端 | `AccessInfo.Path` | `AccessInfo.URL` |
 |---|---|---|
-| LocalFS | 绝对文件路径 | 空 |
+| LocalFS（无 AccessFunc） | 绝对文件路径 | 空 |
+| LocalFS（有 AccessFunc） | 绝对文件路径 | AccessFunc 生成的 URL |
 | ObjectFS | 空 | 预签名/公开/CDN URL |
 
 ```go
-// LocalFS
-info, err := localFS.Access(ctx, "doc.pdf")
-fmt.Println(info.Path) // "/data/doc.pdf"
+// LocalFS — 同时获取磁盘路径和 HTTP URL
+localFS, _ := virefs.NewLocalFS("/data/files",
+    virefs.WithLocalAccessFunc(func(key string) *virefs.AccessInfo {
+        return &virefs.AccessInfo{URL: "https://cdn.example.com/files/" + key}
+    }),
+)
+info, _ := localFS.Access(ctx, "images/logo.png")
+fmt.Println(info.Path) // "/data/files/images/logo.png"
+fmt.Println(info.URL)  // "https://cdn.example.com/files/images/logo.png"
 
 // ObjectFS（自动选择：AccessFunc > Presign > BaseURL）
 info, err = objFS.Access(ctx, "doc.pdf")
 fmt.Println(info.URL)
 ```
 
-自定义 CDN 域名：
+ObjectFS 自定义 CDN 域名：
 
 ```go
 fs := virefs.NewObjectFS(client, "bucket",
@@ -348,6 +386,45 @@ ObjectFS 使用 S3 `DeleteObjects` 实现高效批量删除，其他后端自动
 err := virefs.BatchDelete(ctx, fs, []string{"a.txt", "b.txt", "c.txt"})
 ```
 
+### Migrate — 批量迁移
+
+`Migrate` 递归复制文件，支持冲突策略、DryRun、进度回调和 key 变换：
+
+```go
+result, err := virefs.Migrate(ctx, srcFS, "old-data", dstFS, "new-data",
+    virefs.WithConflictPolicy(virefs.ConflictSkip),
+    virefs.WithProgressFunc(func(p virefs.MigrateProgress) {
+        fmt.Printf("[%d/%d] %s\n", p.Copied+p.Skipped, p.Total, p.Key)
+    }),
+)
+fmt.Printf("copied=%d skipped=%d total=%d\n", result.Copied, result.Skipped, result.Total)
+```
+
+冲突策略：
+
+| 策略 | 行为 |
+|---|---|
+| `ConflictError` | 遇到已存在的 key 立即返回错误（默认） |
+| `ConflictSkip` | 跳过已存在的 key |
+| `ConflictOverwrite` | 覆盖已存在的 key |
+
+DryRun 模式只遍历不复制，报告将会发生的操作：
+
+```go
+result, _ := virefs.Migrate(ctx, src, "", dst, "",
+    virefs.WithDryRun(),
+    virefs.WithConflictPolicy(virefs.ConflictSkip),
+)
+```
+
+Key 变换——迁移时重命名文件：
+
+```go
+virefs.WithMigrateKeyFunc(func(key string) string {
+    return "v2/" + key
+})
+```
+
 ### Stat — 获取文件元信息（含 ContentType）
 
 `Stat` 返回的 `FileInfo` 包含 `ContentType` 字段，所有后端行为一致：
@@ -403,6 +480,50 @@ if p, ok := inner.(virefs.Presigner); ok {
 }
 ```
 
+### Chain — 中间件链
+
+需要同时做日志、加密、限速等多层拦截时，使用 `Chain` + `Middleware` 组合多个层：
+
+```go
+fs := virefs.Chain(baseFS,
+    loggingMiddleware(logger),
+    encryptionMiddleware(key),
+)
+```
+
+编写自定义中间件：嵌入 `BaseFS`，只覆盖需要拦截的方法：
+
+```go
+type metricsFS struct {
+    virefs.BaseFS
+    counter *atomic.Int64
+}
+
+func (m *metricsFS) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+    m.counter.Add(1)
+    return m.Inner.Get(ctx, key)
+}
+
+func metricsMiddleware(counter *atomic.Int64) virefs.Middleware {
+    return func(next virefs.FS) virefs.FS {
+        return &metricsFS{BaseFS: virefs.BaseFS{Inner: next}, counter: counter}
+    }
+}
+```
+
+`WithHooks` 可以直接在 `Chain` 中使用——它本身就是一个中间件：
+
+```go
+fs := virefs.Chain(baseFS,
+    func(next virefs.FS) virefs.FS {
+        return virefs.WithHooks(next, virefs.Hooks{
+            OnDelete: func(key string) { log.Println("deleted:", key) },
+        })
+    },
+    metricsMiddleware(counter),
+)
+```
+
 ### MountTable — 多后端路由（可选）
 
 当需要通过单个 `FS` 接口操作多个后端时，使用 MountTable 按前缀路由：
@@ -437,6 +558,7 @@ flowchart LR
 | `WithDirPerm(perm)` | 自动创建目录的权限（默认 0755） |
 | `WithLocalKeyFunc(fn)` | key 变换函数 |
 | `WithAtomicWrite()` | 启用原子写入 |
+| `WithLocalAccessFunc(fn)` | 自定义 Access URL 生成（Path + URL 同时返回） |
 
 ### ObjectFS
 

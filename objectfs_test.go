@@ -631,6 +631,30 @@ func TestObjectFS_Exists(t *testing.T) {
 	}
 }
 
+func TestObjectFS_ExistsMethod(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket", WithPrefix("pfx/"))
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "data.bin", strings.NewReader("bin"))
+
+	ok, err := fs.Exists(ctx, "data.bin")
+	if err != nil {
+		t.Fatalf("Exists: %v", err)
+	}
+	if !ok {
+		t.Fatal("Exists should return true")
+	}
+
+	ok, err = fs.Exists(ctx, "missing.bin")
+	if err != nil {
+		t.Fatalf("Exists missing: %v", err)
+	}
+	if ok {
+		t.Fatal("Exists should return false")
+	}
+}
+
 func TestObjectFS_CrossBackendCopy(t *testing.T) {
 	fake1 := newFakeS3()
 	fake2 := newFakeS3()

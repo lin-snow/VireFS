@@ -144,3 +144,98 @@ func ExampleNewMountTable() {
 	fmt.Println(string(data))
 	// Output: hello
 }
+
+func ExampleNewLocalFS_withAccessFunc() {
+	dir, _ := os.MkdirTemp("", "virefs-example-*")
+	defer os.RemoveAll(dir)
+
+	fs, err := virefs.NewLocalFS(dir, virefs.WithLocalAccessFunc(func(key string) *virefs.AccessInfo {
+		return &virefs.AccessInfo{URL: "https://cdn.example.com/files/" + key}
+	}))
+	if err != nil {
+		log.Fatal(err)
+	}
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "photo.jpg", strings.NewReader("jpeg-data"))
+
+	info, err := fs.Access(ctx, "photo.jpg")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(info.URL)
+	fmt.Println(info.Path != "")
+	// Output:
+	// https://cdn.example.com/files/photo.jpg
+	// true
+}
+
+func ExampleChain() {
+	dir, _ := os.MkdirTemp("", "virefs-example-*")
+	defer os.RemoveAll(dir)
+
+	base, _ := virefs.NewLocalFS(dir)
+	ctx := context.Background()
+
+	_ = base.Put(ctx, "secret.txt", strings.NewReader("classified"))
+
+	// Build a middleware chain: logging (outer) → uppercase (inner)
+	fs := virefs.Chain(base,
+		// Middleware 1: uppercase Get results
+		func(next virefs.FS) virefs.FS {
+			return &uppercaseFS{virefs.BaseFS{Inner: next}}
+		},
+		// Middleware 2: WithHooks for audit logging
+		func(next virefs.FS) virefs.FS {
+			return virefs.WithHooks(next, virefs.Hooks{
+				WrapGet: func(key string, rc io.ReadCloser) io.ReadCloser {
+					fmt.Println("audit: read", key)
+					return rc
+				},
+			})
+		},
+	)
+
+	rc, _ := fs.Get(ctx, "secret.txt")
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	fmt.Println(string(data))
+	// Output:
+	// audit: read secret.txt
+	// CLASSIFIED
+}
+
+type uppercaseFS struct{ virefs.BaseFS }
+
+func (u *uppercaseFS) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	rc, err := u.Inner.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	return io.NopCloser(strings.NewReader(strings.ToUpper(string(data)))), nil
+}
+
+func ExampleMigrate() {
+	srcDir, _ := os.MkdirTemp("", "virefs-src-*")
+	defer os.RemoveAll(srcDir)
+	dstDir, _ := os.MkdirTemp("", "virefs-dst-*")
+	defer os.RemoveAll(dstDir)
+
+	src, _ := virefs.NewLocalFS(srcDir)
+	dst, _ := virefs.NewLocalFS(dstDir)
+	ctx := context.Background()
+
+	_ = src.Put(ctx, "a.txt", strings.NewReader("aaa"))
+	_ = src.Put(ctx, "b.txt", strings.NewReader("bbb"))
+
+	result, err := virefs.Migrate(ctx, src, "", dst, "backup",
+		virefs.WithConflictPolicy(virefs.ConflictSkip),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("copied=%d skipped=%d total=%d\n", result.Copied, result.Skipped, result.Total)
+	// Output: copied=2 skipped=0 total=2
+}

@@ -14,8 +14,12 @@ virefs (根包)
 ├── key.go           # CleanKey：key 规范化与路径穿越防护
 ├── localfs.go       # LocalFS 实现（本地磁盘后端）
 ├── objectfs.go      # ObjectFS 实现（S3/MinIO/R2 后端）
+├── s3config.go      # S3Config、Provider、NewS3Client、NewObjectFSFromConfig
 ├── mount.go         # MountTable：多后端按前缀路由
 ├── schema.go        # Schema：声明式 key 路由（按扩展名/自定义函数）
+├── migrate.go       # Migrate：批量迁移（Walk + Copy + 冲突策略）
+├── hook.go          # WithHooks：操作拦截装饰器
+├── walk.go          # Walk：递归遍历
 ├── *_test.go        # 对应的测试文件
 └── plugin/
     └── zip/         # zip.FS 插件（只读 FS，基于 zip 归档）
@@ -29,9 +33,11 @@ virefs (根包)
 
 ### 接口层次
 
-- `FS` 是所有后端必须实现的最小接口（Get/Put/Delete/List/Stat/Access）
+- `FS` 是所有后端必须实现的最小接口（Get/Put/Delete/List/Stat/Access/Exists）
 - `Copier` 和 `Presigner` 是可选能力接口，通过类型断言使用
 - `KeyFunc` 和 `AccessFunc` 是函数类型，用于扩展 key 变换和 URL 生成
+- `Middleware` 是 `func(FS) FS`，通过 `Chain` 组合多层中间件
+- `BaseFS` 是嵌入辅助结构体，编写中间件时只需覆盖需要拦截的方法
 
 ### key 处理流水线
 
@@ -39,7 +45,7 @@ virefs (根包)
 
 ### 错误处理
 
-- 使用 `fs.go` 中的四个哨兵错误：`ErrNotFound`、`ErrInvalidKey`、`ErrAlreadyExist`、`ErrNotSupported`
+- 使用 `fs.go` 中的五个哨兵错误：`ErrNotFound`、`ErrInvalidKey`、`ErrAlreadyExist`、`ErrNotSupported`、`ErrPermission`
 - 后端实现必须将错误包装为 `*OpError{Op, Key, Err}`
 - 始终使用 `errors.Is()` 检查哨兵错误
 
@@ -59,7 +65,7 @@ virefs (根包)
 ## 添加新后端
 
 1. 在根包中创建新文件（如 `newbackend.go`）
-2. 实现 `FS` 接口的全部六个方法
+2. 实现 `FS` 接口的全部七个方法
 3. key 处理必须调用 `CleanKey` 并应用 `KeyFunc`（如支持）
 4. 错误必须包装为 `*OpError`
 5. 如支持高效复制，额外实现 `Copier`
@@ -86,7 +92,7 @@ ObjectFS 测试使用 mock S3 客户端，无需真实 S3 服务。
 
 ## 注意事项
 
-- 不要引入对 AWS SDK 的直接依赖之外的新依赖，除非有充分理由
+- 仅依赖 AWS SDK（aws-sdk-go-v2 核心、s3、config、credentials），不要引入其他外部依赖，除非有充分理由
 - `CleanKey` 是安全边界，不要绕过它
 - LocalFS 的 `WithAtomicWrite()` 使用 temp + rename 模式，修改时注意跨文件系统兼容性
 - MountTable 的 prefix 必须是单段路径（不含 `/`）

@@ -203,6 +203,32 @@ func TestWithHooks_Unwrap(t *testing.T) {
 	}
 }
 
+func TestWithHooks_Exists(t *testing.T) {
+	dir := t.TempDir()
+	inner := mustNewLocalFS(t, dir)
+	ctx := context.Background()
+
+	_ = inner.Put(ctx, "exists.txt", strings.NewReader("yes"))
+
+	hfs := WithHooks(inner, Hooks{})
+
+	ok, err := hfs.Exists(ctx, "exists.txt")
+	if err != nil {
+		t.Fatalf("Exists: %v", err)
+	}
+	if !ok {
+		t.Fatal("Exists should return true")
+	}
+
+	ok, err = hfs.Exists(ctx, "missing.txt")
+	if err != nil {
+		t.Fatalf("Exists missing: %v", err)
+	}
+	if ok {
+		t.Fatal("Exists should return false")
+	}
+}
+
 func TestWithHooks_MultipleHooks(t *testing.T) {
 	dir := t.TempDir()
 	inner := mustNewLocalFS(t, dir)
@@ -226,5 +252,225 @@ func TestWithHooks_MultipleHooks(t *testing.T) {
 	_ = hfs.Delete(ctx, "traced.txt")
 	if buf.Len() != 0 {
 		t.Fatal("OnDelete should have reset the buffer")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Chain + BaseFS tests
+// ---------------------------------------------------------------------------
+
+func TestChain_Order(t *testing.T) {
+	dir := t.TempDir()
+	base := mustNewLocalFS(t, dir)
+	ctx := context.Background()
+
+	_ = base.Put(ctx, "file.txt", strings.NewReader("original"))
+
+	var order []string
+
+	mw1 := func(next FS) FS {
+		return WithHooks(next, Hooks{
+			WrapGet: func(key string, rc io.ReadCloser) io.ReadCloser {
+				order = append(order, "mw1")
+				return rc
+			},
+		})
+	}
+
+	mw2 := func(next FS) FS {
+		return WithHooks(next, Hooks{
+			WrapGet: func(key string, rc io.ReadCloser) io.ReadCloser {
+				order = append(order, "mw2")
+				return rc
+			},
+		})
+	}
+
+	fs := Chain(base, mw1, mw2)
+	rc, err := fs.Get(ctx, "file.txt")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	rc.Close()
+
+	// Chain applies mw1 first (innermost), then mw2 (outermost).
+	// WrapGet fires after the inner Get returns, so mw1's hook runs
+	// before mw2's.
+	if len(order) != 2 || order[0] != "mw1" || order[1] != "mw2" {
+		t.Fatalf("execution order = %v, want [mw1 mw2]", order)
+	}
+}
+
+func TestChain_Empty(t *testing.T) {
+	dir := t.TempDir()
+	base := mustNewLocalFS(t, dir)
+
+	fs := Chain(base)
+	if fs != base {
+		t.Fatal("Chain with no middlewares should return the original FS")
+	}
+}
+
+type uppercaseGetFS struct {
+	BaseFS
+}
+
+func (u *uppercaseGetFS) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	rc, err := u.Inner.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	upper := strings.ToUpper(string(data))
+	return io.NopCloser(strings.NewReader(upper)), nil
+}
+
+func TestBaseFS_Override(t *testing.T) {
+	dir := t.TempDir()
+	base := mustNewLocalFS(t, dir)
+	ctx := context.Background()
+
+	_ = base.Put(ctx, "msg.txt", strings.NewReader("hello"))
+
+	fs := &uppercaseGetFS{BaseFS{Inner: base}}
+
+	rc, err := fs.Get(ctx, "msg.txt")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "HELLO" {
+		t.Fatalf("Get = %q, want %q", data, "HELLO")
+	}
+
+	// Non-overridden methods should still work via BaseFS forwarding
+	info, err := fs.Stat(ctx, "msg.txt")
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if info.Size != 5 {
+		t.Fatalf("Stat size = %d, want 5", info.Size)
+	}
+
+	ok, err := fs.Exists(ctx, "msg.txt")
+	if err != nil {
+		t.Fatalf("Exists: %v", err)
+	}
+	if !ok {
+		t.Fatal("Exists should return true")
+	}
+}
+
+func TestChain_WithHooksInterop(t *testing.T) {
+	dir := t.TempDir()
+	base := mustNewLocalFS(t, dir)
+	ctx := context.Background()
+
+	_ = base.Put(ctx, "data.txt", strings.NewReader("raw"))
+
+	var logged bool
+	logMW := func(next FS) FS {
+		return &logTestFS{BaseFS: BaseFS{Inner: next}, logged: &logged}
+	}
+
+	encryptMW := func(next FS) FS {
+		return WithHooks(next, Hooks{
+			WrapGet: func(key string, rc io.ReadCloser) io.ReadCloser {
+				data, _ := io.ReadAll(rc)
+				rc.Close()
+				return io.NopCloser(strings.NewReader("[decrypted]" + string(data)))
+			},
+		})
+	}
+
+	fs := Chain(base, encryptMW, logMW)
+
+	rc, err := fs.Get(ctx, "data.txt")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+
+	if !logged {
+		t.Fatal("log middleware should have been called")
+	}
+	if string(data) != "[decrypted]raw" {
+		t.Fatalf("Get = %q, want %q", data, "[decrypted]raw")
+	}
+}
+
+type logTestFS struct {
+	BaseFS
+	logged *bool
+}
+
+func (l *logTestFS) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	*l.logged = true
+	return l.Inner.Get(ctx, key)
+}
+
+func TestBaseFS_AllMethods(t *testing.T) {
+	dir := t.TempDir()
+	inner := mustNewLocalFS(t, dir)
+	ctx := context.Background()
+
+	fs := BaseFS{Inner: inner}
+
+	if err := fs.Put(ctx, "test.txt", strings.NewReader("data")); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	rc, err := fs.Get(ctx, "test.txt")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "data" {
+		t.Fatalf("Get = %q, want %q", data, "data")
+	}
+
+	info, err := fs.Stat(ctx, "test.txt")
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if info.Size != 4 {
+		t.Fatalf("Stat size = %d, want 4", info.Size)
+	}
+
+	ok, err := fs.Exists(ctx, "test.txt")
+	if err != nil {
+		t.Fatalf("Exists: %v", err)
+	}
+	if !ok {
+		t.Fatal("Exists should return true")
+	}
+
+	result, err := fs.List(ctx, "")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(result.Files) != 1 {
+		t.Fatalf("List got %d entries, want 1", len(result.Files))
+	}
+
+	accessInfo, err := fs.Access(ctx, "test.txt")
+	if err != nil {
+		t.Fatalf("Access: %v", err)
+	}
+	if accessInfo.Path == "" {
+		t.Fatal("Access.Path should be non-empty")
+	}
+
+	if err := fs.Delete(ctx, "test.txt"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	ok, _ = fs.Exists(ctx, "test.txt")
+	if ok {
+		t.Fatal("Exists should return false after delete")
 	}
 }

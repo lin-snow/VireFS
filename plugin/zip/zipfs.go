@@ -155,6 +155,16 @@ func (z *FS) Stat(_ context.Context, key string) (*virefs.FileInfo, error) {
 	return &fi, nil
 }
 
+// Exists implements virefs.FS.
+func (z *FS) Exists(_ context.Context, key string) (bool, error) {
+	cleaned, err := virefs.CleanKey(key)
+	if err != nil {
+		return false, &virefs.OpError{Op: "Exists", Key: key, Err: err}
+	}
+	_, ok := z.index[cleaned]
+	return ok, nil
+}
+
 // Access implements virefs.FS. Always returns ErrNotSupported.
 func (z *FS) Access(_ context.Context, key string) (*virefs.AccessInfo, error) {
 	return nil, &virefs.OpError{Op: "Access", Key: key, Err: virefs.ErrNotSupported}

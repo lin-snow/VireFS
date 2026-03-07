@@ -159,10 +159,87 @@ func TestLocalFS_Access(t *testing.T) {
 		t.Fatal("Access.Path should be non-empty for LocalFS")
 	}
 	if info.URL != "" {
-		t.Fatal("Access.URL should be empty for LocalFS")
+		t.Fatal("Access.URL should be empty for LocalFS without AccessFunc")
 	}
 	if !strings.HasSuffix(info.Path, "doc/readme.txt") {
 		t.Fatalf("Access.Path = %q, want suffix doc/readme.txt", info.Path)
+	}
+}
+
+func TestLocalFS_AccessWithAccessFunc(t *testing.T) {
+	dir := t.TempDir()
+	fs := mustNewLocalFS(t, dir, WithLocalAccessFunc(func(key string) *AccessInfo {
+		return &AccessInfo{URL: "https://cdn.example.com/files/" + key}
+	}))
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "images/logo.png", strings.NewReader("png"))
+
+	info, err := fs.Access(ctx, "images/logo.png")
+	if err != nil {
+		t.Fatalf("Access with AccessFunc: %v", err)
+	}
+	if info.Path == "" {
+		t.Fatal("Access.Path should still be set with AccessFunc")
+	}
+	if !strings.HasSuffix(info.Path, "images/logo.png") {
+		t.Fatalf("Access.Path = %q, want suffix images/logo.png", info.Path)
+	}
+	wantURL := "https://cdn.example.com/files/images/logo.png"
+	if info.URL != wantURL {
+		t.Fatalf("Access.URL = %q, want %q", info.URL, wantURL)
+	}
+}
+
+func TestLocalFS_AccessFuncWithKeyFunc(t *testing.T) {
+	dir := t.TempDir()
+	fs := mustNewLocalFS(t, dir,
+		WithLocalKeyFunc(func(key string) string { return "v2/" + key }),
+		WithLocalAccessFunc(func(key string) *AccessInfo {
+			return &AccessInfo{URL: "https://cdn.example.com/" + key}
+		}),
+	)
+	ctx := context.Background()
+
+	info, err := fs.Access(ctx, "doc.txt")
+	if err != nil {
+		t.Fatalf("Access: %v", err)
+	}
+	if !strings.HasSuffix(info.Path, "v2/doc.txt") {
+		t.Fatalf("Access.Path = %q, want suffix v2/doc.txt", info.Path)
+	}
+	wantURL := "https://cdn.example.com/v2/doc.txt"
+	if info.URL != wantURL {
+		t.Fatalf("Access.URL = %q, want %q", info.URL, wantURL)
+	}
+}
+
+func TestLocalFS_ExistsMethod(t *testing.T) {
+	dir := t.TempDir()
+	fs := mustNewLocalFS(t, dir)
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "found.txt", strings.NewReader("yes"))
+
+	ok, err := fs.Exists(ctx, "found.txt")
+	if err != nil {
+		t.Fatalf("Exists: %v", err)
+	}
+	if !ok {
+		t.Fatal("Exists should return true for existing key")
+	}
+
+	ok, err = fs.Exists(ctx, "missing.txt")
+	if err != nil {
+		t.Fatalf("Exists missing: %v", err)
+	}
+	if ok {
+		t.Fatal("Exists should return false for missing key")
+	}
+
+	_, err = fs.Exists(ctx, "../../etc/passwd")
+	if err == nil {
+		t.Fatal("Exists with traversal should return error")
 	}
 }
 

@@ -61,6 +61,11 @@ type FS interface {
 	// LocalFS returns AccessInfo.Path (absolute file path).
 	// ObjectFS returns AccessInfo.URL (presigned or public URL).
 	Access(ctx context.Context, key string) (*AccessInfo, error)
+
+	// Exists reports whether a key exists in the backend.
+	// It returns (false, nil) when the key is not found, rather than an error.
+	// Backends may implement this more efficiently than Stat (e.g. S3 HeadObject).
+	Exists(ctx context.Context, key string) (bool, error)
 }
 
 // PutOption configures a Put operation.
@@ -93,17 +98,11 @@ func WithMetadata(m map[string]string) PutOption {
 	return func(c *PutConfig) { c.Metadata = m }
 }
 
-// Exists is a convenience helper that checks whether a key exists in fs.
-// It returns (false, nil) when the key is not found, rather than an error.
+// Exists is a convenience helper that delegates to fs.Exists.
+// It is kept for backward compatibility with code that calls the
+// package-level function instead of the interface method.
 func Exists(ctx context.Context, fs FS, key string) (bool, error) {
-	_, err := fs.Stat(ctx, key)
-	if err == nil {
-		return true, nil
-	}
-	if errors.Is(err, ErrNotFound) {
-		return false, nil
-	}
-	return false, err
+	return fs.Exists(ctx, key)
 }
 
 // Copier is an optional interface for efficient same-backend copies.
@@ -156,11 +155,13 @@ func Copy(ctx context.Context, src FS, srcKey string, dst FS, dstKey string, opt
 }
 
 // AccessInfo describes how to access a file from outside the FS abstraction.
-// Exactly one of Path or URL will be non-empty.
+// At least one of Path or URL will be non-empty; both may be set
+// simultaneously (e.g. LocalFS with an AccessFunc that adds an HTTP URL).
 type AccessInfo struct {
 	// Path is the absolute local file path (set by LocalFS).
 	Path string
-	// URL is a directly accessible URL (set by ObjectFS — presigned or public).
+	// URL is a directly accessible URL (set by ObjectFS — presigned or public,
+	// or by LocalFS when an AccessFunc is configured).
 	URL string
 }
 
