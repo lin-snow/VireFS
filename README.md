@@ -482,12 +482,13 @@ if p, ok := inner.(virefs.Presigner); ok {
 
 ### Chain — 中间件链
 
-需要同时做日志、加密、限速等多层拦截时，使用 `Chain` + `Middleware` 组合多个层：
+需要同时做日志、加密、限速等多层拦截时，使用 `Chain` + `Middleware` 组合多个层。
+中间件按声明顺序依次包裹，最后一个中间件处于最外层（调用者最先触达）：
 
 ```go
 fs := virefs.Chain(baseFS,
-    loggingMiddleware(logger),
-    encryptionMiddleware(key),
+    encryptionMiddleware(key),    // 内层：靠近 baseFS
+    loggingMiddleware(logger),    // 外层：调用者最先触达
 )
 ```
 

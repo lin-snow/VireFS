@@ -116,13 +116,14 @@ var _ FS = (*hookFS)(nil)
 // Use [Chain] to compose multiple middlewares.
 type Middleware func(FS) FS
 
-// Chain applies middlewares to fs in order. The first middleware in the list
-// becomes the outermost layer (executed first on every call), and the last
-// middleware is closest to the base FS.
+// Chain applies middlewares to fs in declaration order. Each middleware
+// wraps the result of the previous one, so the first middleware is closest
+// to the base FS (innermost) and the last middleware is outermost
+// (its methods are called first by the caller).
 //
 //	fs := virefs.Chain(baseFS,
-//	    loggingMiddleware,
-//	    metricsMiddleware,
+//	    innerMiddleware,  // applied first, closest to baseFS
+//	    outerMiddleware,  // applied last, outermost layer
 //	)
 func Chain(fs FS, mw ...Middleware) FS {
 	for _, m := range mw {

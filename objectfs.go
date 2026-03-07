@@ -426,6 +426,7 @@ func (o *ObjectFS) BatchDelete(ctx context.Context, keys []string) error {
 }
 
 // Compile-time checks.
+var _ FS = (*ObjectFS)(nil)
 var _ Presigner = (*ObjectFS)(nil)
 var _ Copier = (*ObjectFS)(nil)
 var _ BatchDeleter = (*ObjectFS)(nil)

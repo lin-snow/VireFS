@@ -179,14 +179,12 @@ func ExampleChain() {
 
 	_ = base.Put(ctx, "secret.txt", strings.NewReader("classified"))
 
-	// Build a middleware chain: logging (outer) → uppercase (inner)
+	// Chain: uppercase is inner (closest to base), logging is outer (caller hits first)
 	fs := virefs.Chain(base,
-		// Middleware 1: uppercase Get results
-		func(next virefs.FS) virefs.FS {
+		func(next virefs.FS) virefs.FS { // inner: uppercase
 			return &uppercaseFS{virefs.BaseFS{Inner: next}}
 		},
-		// Middleware 2: WithHooks for audit logging
-		func(next virefs.FS) virefs.FS {
+		func(next virefs.FS) virefs.FS { // outer: audit log
 			return virefs.WithHooks(next, virefs.Hooks{
 				WrapGet: func(key string, rc io.ReadCloser) io.ReadCloser {
 					fmt.Println("audit: read", key)
