@@ -99,6 +99,43 @@ func TestFS_GetAndStat(t *testing.T) {
 	}
 }
 
+func TestFS_StatContentType(t *testing.T) {
+	data := makeZipBytes(t, map[string]string{
+		"image.jpg": "fake-jpeg",
+		"doc.txt":   "text content",
+		"noext":     "no extension",
+	})
+	zfs, err := NewFSFromBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	info, err := zfs.Stat(ctx, "image.jpg")
+	if err != nil {
+		t.Fatalf("Stat image.jpg: %v", err)
+	}
+	if info.ContentType != "image/jpeg" {
+		t.Fatalf("Stat image.jpg ContentType = %q, want %q", info.ContentType, "image/jpeg")
+	}
+
+	info, err = zfs.Stat(ctx, "doc.txt")
+	if err != nil {
+		t.Fatalf("Stat doc.txt: %v", err)
+	}
+	if !strings.HasPrefix(info.ContentType, "text/plain") {
+		t.Fatalf("Stat doc.txt ContentType = %q, want prefix %q", info.ContentType, "text/plain")
+	}
+
+	info, err = zfs.Stat(ctx, "noext")
+	if err != nil {
+		t.Fatalf("Stat noext: %v", err)
+	}
+	if info.ContentType != "" {
+		t.Fatalf("Stat noext ContentType = %q, want empty", info.ContentType)
+	}
+}
+
 func TestFS_GetNotFound(t *testing.T) {
 	data := makeZipBytes(t, map[string]string{"a.txt": "a"})
 	zfs, err := NewFSFromBytes(data)

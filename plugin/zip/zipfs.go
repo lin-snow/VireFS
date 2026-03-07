@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"mime"
 	"os"
+	"path"
 	"strings"
 
 	virefs "github.com/lin-snow/VireFS"
@@ -177,5 +179,6 @@ func fileInfoFromZip(key string, f *zip.File) virefs.FileInfo {
 		Size:         int64(f.UncompressedSize64),
 		LastModified: f.Modified,
 		IsDir:        f.FileInfo().IsDir(),
+		ContentType:  mime.TypeByExtension(path.Ext(key)),
 	}
 }

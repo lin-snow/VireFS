@@ -257,6 +257,7 @@ func (o *ObjectFS) Stat(ctx context.Context, key string) (*FileInfo, error) {
 		Key:          key,
 		Size:         aws.ToInt64(out.ContentLength),
 		LastModified: aws.ToTime(out.LastModified),
+		ContentType:  aws.ToString(out.ContentType),
 	}, nil
 }
 

@@ -24,6 +24,7 @@ type FileInfo struct {
 	Size         int64
 	LastModified time.Time
 	IsDir        bool
+	ContentType  string // MIME type, e.g. "image/jpeg"; may be empty
 }
 
 // ListResult is returned by FS.List.

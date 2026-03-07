@@ -99,10 +99,14 @@ func (f *fakeS3) HeadObject(_ context.Context, in *s3.HeadObjectInput, _ ...func
 		return nil, &types.NotFound{Message: aws.String("not found: " + key)}
 	}
 	now := time.Now()
-	return &s3.HeadObjectOutput{
+	out := &s3.HeadObjectOutput{
 		ContentLength: aws.Int64(int64(len(data))),
 		LastModified:  &now,
-	}, nil
+	}
+	if ct, ok := f.contentTypes[key]; ok {
+		out.ContentType = aws.String(ct)
+	}
+	return out, nil
 }
 
 func (f *fakeS3) ListObjectsV2(_ context.Context, in *s3.ListObjectsV2Input, _ ...func(*s3.Options)) (*s3.ListObjectsV2Output, error) {
@@ -528,6 +532,38 @@ func TestObjectFS_PutWithContentType(t *testing.T) {
 
 	if ct := fake.contentTypes["image.png"]; ct != "image/png" {
 		t.Fatalf("ContentType = %q, want %q", ct, "image/png")
+	}
+}
+
+func TestObjectFS_StatContentType(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket")
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "image.png", strings.NewReader("png-data"), WithContentType("image/png"))
+
+	info, err := fs.Stat(ctx, "image.png")
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if info.ContentType != "image/png" {
+		t.Fatalf("Stat ContentType = %q, want %q", info.ContentType, "image/png")
+	}
+}
+
+func TestObjectFS_StatContentTypeEmpty(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket")
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "data.bin", strings.NewReader("binary"))
+
+	info, err := fs.Stat(ctx, "data.bin")
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if info.ContentType != "" {
+		t.Fatalf("Stat ContentType = %q, want empty", info.ContentType)
 	}
 }
 

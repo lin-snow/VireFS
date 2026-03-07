@@ -378,6 +378,40 @@ func TestLocalFS_WithDirPerm(t *testing.T) {
 	}
 }
 
+func TestLocalFS_StatContentType(t *testing.T) {
+	dir := t.TempDir()
+	fs := mustNewLocalFS(t, dir)
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "photo.jpg", strings.NewReader("fake-jpeg"))
+	_ = fs.Put(ctx, "readme.txt", strings.NewReader("text"))
+	_ = fs.Put(ctx, "noext", strings.NewReader("no extension"))
+
+	info, err := fs.Stat(ctx, "photo.jpg")
+	if err != nil {
+		t.Fatalf("Stat photo.jpg: %v", err)
+	}
+	if info.ContentType != "image/jpeg" {
+		t.Fatalf("Stat photo.jpg ContentType = %q, want %q", info.ContentType, "image/jpeg")
+	}
+
+	info, err = fs.Stat(ctx, "readme.txt")
+	if err != nil {
+		t.Fatalf("Stat readme.txt: %v", err)
+	}
+	if !strings.HasPrefix(info.ContentType, "text/plain") {
+		t.Fatalf("Stat readme.txt ContentType = %q, want prefix %q", info.ContentType, "text/plain")
+	}
+
+	info, err = fs.Stat(ctx, "noext")
+	if err != nil {
+		t.Fatalf("Stat noext: %v", err)
+	}
+	if info.ContentType != "" {
+		t.Fatalf("Stat noext ContentType = %q, want empty", info.ContentType)
+	}
+}
+
 func TestLocalFS_ListShallow(t *testing.T) {
 	dir := t.TempDir()
 	fs := mustNewLocalFS(t, dir)

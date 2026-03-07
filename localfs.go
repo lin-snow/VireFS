@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"os"
 	"path/filepath"
 	"strings"
@@ -227,6 +228,7 @@ func (l *LocalFS) Stat(ctx context.Context, key string) (*FileInfo, error) {
 		Size:         info.Size(),
 		LastModified: info.ModTime(),
 		IsDir:        info.IsDir(),
+		ContentType:  mime.TypeByExtension(filepath.Ext(key)),
 	}, nil
 }
 
