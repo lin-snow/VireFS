@@ -201,6 +201,9 @@ func (o *ObjectFS) List(ctx context.Context, prefix string) (*ListResult, error)
 	result := &ListResult{}
 	var continuationToken *string
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, &OpError{Op: "List", Key: prefix, Err: err}
+		}
 		out, err := o.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 			Bucket:            aws.String(o.bucket),
 			Prefix:            aws.String(s3Prefix),
@@ -341,7 +344,9 @@ func (o *ObjectFS) Access(ctx context.Context, key string) (*AccessInfo, error) 
 	}
 
 	if o.accessFunc != nil {
-		return o.accessFunc(s3k), nil
+		if info := o.accessFunc(s3k); info != nil {
+			return info, nil
+		}
 	}
 
 	if o.presignClient != nil {
@@ -394,6 +399,9 @@ func (o *ObjectFS) Copy(ctx context.Context, srcKey, dstKey string) error {
 func (o *ObjectFS) BatchDelete(ctx context.Context, keys []string) error {
 	const maxBatch = 1000
 	for i := 0; i < len(keys); i += maxBatch {
+		if err := ctx.Err(); err != nil {
+			return &OpError{Op: "BatchDelete", Key: fmt.Sprintf("%d keys remaining", len(keys)-i), Err: err}
+		}
 		end := i + maxBatch
 		if end > len(keys) {
 			end = len(keys)

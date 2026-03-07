@@ -42,7 +42,10 @@ func (mt *MountTable) Unmount(prefix string) {
 }
 
 // resolve splits a full key into the target FS and the sub-key.
-func (mt *MountTable) resolve(fullKey string) (FS, string, error) {
+func (mt *MountTable) resolve(ctx context.Context, fullKey string) (FS, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
 	cleaned, err := CleanKey(fullKey)
 	if err != nil {
 		return nil, "", err
@@ -65,7 +68,7 @@ func (mt *MountTable) resolve(fullKey string) (FS, string, error) {
 
 // Get implements FS.
 func (mt *MountTable) Get(ctx context.Context, key string) (io.ReadCloser, error) {
-	fs, sub, err := mt.resolve(key)
+	fs, sub, err := mt.resolve(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +77,7 @@ func (mt *MountTable) Get(ctx context.Context, key string) (io.ReadCloser, error
 
 // Put implements FS.
 func (mt *MountTable) Put(ctx context.Context, key string, r io.Reader, opts ...PutOption) error {
-	fs, sub, err := mt.resolve(key)
+	fs, sub, err := mt.resolve(ctx, key)
 	if err != nil {
 		return err
 	}
@@ -83,7 +86,7 @@ func (mt *MountTable) Put(ctx context.Context, key string, r io.Reader, opts ...
 
 // Delete implements FS.
 func (mt *MountTable) Delete(ctx context.Context, key string) error {
-	fs, sub, err := mt.resolve(key)
+	fs, sub, err := mt.resolve(ctx, key)
 	if err != nil {
 		return err
 	}
@@ -103,7 +106,7 @@ func (mt *MountTable) List(ctx context.Context, prefix string) (*ListResult, err
 		}
 		return result, nil
 	}
-	fs, sub, err := mt.resolve(prefix)
+	fs, sub, err := mt.resolve(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +115,7 @@ func (mt *MountTable) List(ctx context.Context, prefix string) (*ListResult, err
 
 // Stat implements FS.
 func (mt *MountTable) Stat(ctx context.Context, key string) (*FileInfo, error) {
-	fs, sub, err := mt.resolve(key)
+	fs, sub, err := mt.resolve(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +124,7 @@ func (mt *MountTable) Stat(ctx context.Context, key string) (*FileInfo, error) {
 
 // Exists implements FS.
 func (mt *MountTable) Exists(ctx context.Context, key string) (bool, error) {
-	fs, sub, err := mt.resolve(key)
+	fs, sub, err := mt.resolve(ctx, key)
 	if err != nil {
 		return false, err
 	}
@@ -130,7 +133,7 @@ func (mt *MountTable) Exists(ctx context.Context, key string) (bool, error) {
 
 // Access implements FS.
 func (mt *MountTable) Access(ctx context.Context, key string) (*AccessInfo, error) {
-	fs, sub, err := mt.resolve(key)
+	fs, sub, err := mt.resolve(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -141,11 +144,11 @@ func (mt *MountTable) Access(ctx context.Context, key string) (*AccessInfo, erro
 // and that FS implements Copier, the native copy is used. Otherwise it
 // falls back to Get + Put.
 func (mt *MountTable) Copy(ctx context.Context, srcKey, dstKey string) error {
-	srcFS, srcSub, err := mt.resolve(srcKey)
+	srcFS, srcSub, err := mt.resolve(ctx, srcKey)
 	if err != nil {
 		return err
 	}
-	dstFS, dstSub, err := mt.resolve(dstKey)
+	dstFS, dstSub, err := mt.resolve(ctx, dstKey)
 	if err != nil {
 		return err
 	}

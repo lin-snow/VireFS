@@ -60,6 +60,9 @@ type S3Config struct {
 // Provider-specific quirks (path style, default region) are applied
 // automatically. The caller's S3Config is not modified.
 func NewS3Client(ctx context.Context, cfg *S3Config) (*s3.Client, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("virefs: S3Config must not be nil")
+	}
 	resolved := *cfg
 	applyProviderDefaults(&resolved)
 
@@ -105,6 +108,9 @@ func NewS3Client(ctx context.Context, cfg *S3Config) (*s3.Client, error) {
 //	    Bucket:    "my-bucket",
 //	}, virefs.WithPrefix("uploads/"))
 func NewObjectFSFromConfig(ctx context.Context, cfg *S3Config, opts ...ObjectOption) (*ObjectFS, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("virefs: S3Config must not be nil")
+	}
 	if cfg.Bucket == "" {
 		return nil, fmt.Errorf("virefs: S3Config.Bucket must not be empty")
 	}

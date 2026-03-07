@@ -2,35 +2,65 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/),
+and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v0.1.2] - 2026-03-07
+
+### Breaking Changes
+
+- `FS` interface now includes `Exists(ctx, key) (bool, error)` method. All
+  implementations must add this method. The package-level `Exists()` function
+  is retained as a backward-compatible alias.
 
 ### Added
-- `Walk` helper function for recursive traversal of any FS.
-- `ErrSkipDir` sentinel for skipping directories during Walk.
-- `BatchDeleter` optional interface and `BatchDelete` helper function.
-- `ObjectFS.BatchDelete` using S3 `DeleteObjects` for efficient bulk deletion.
-- `MountTable` now implements `Copier` — same-mount copies use native backend copy.
-- `ErrPermission` sentinel error for permission-denied cases.
-- `doc.go` — package-level documentation for pkg.go.dev.
-- Godoc testable examples (`ExampleNewLocalFS`, `ExampleCopy`, `ExampleWalk`, etc.).
-- Benchmark tests for `CleanKey`, `Schema.Resolve`, and `LocalFS` operations.
-- Test coverage for `MountTable.Unmount`, `MountTable.Delete`, `MountTable.Stat`,
-  `MountTable.ConcurrentAccess`, `LocalFS.WithCreateRoot`, `LocalFS.WithDirPerm`,
-  `LocalFS.DeleteNotFound`, `ObjectFS.ListPagination`, `ObjectFS.ListShallow`.
+
+- **LocalFS AccessFunc**: `WithLocalAccessFunc(fn)` option allows LocalFS to
+  return both a disk `Path` and an HTTP `URL` from `Access()`.
+- **AccessInfo relaxation**: `Path` and `URL` may now both be non-empty
+  simultaneously.
+- **S3 client constructor**: `S3Config`, `Provider` (AWS/MinIO/R2),
+  `NewS3Client()`, and `NewObjectFSFromConfig()` simplify S3 client creation
+  with provider-aware defaults (path style, region).
+- **Migrate tool**: `Migrate()` recursively copies files between any two FS
+  backends with conflict policies (`ConflictError`, `ConflictSkip`,
+  `ConflictOverwrite`), dry-run mode, progress callbacks, and key
+  transformation.
+- **Middleware chain**: `Middleware` type, `Chain()` function, and `BaseFS`
+  embedding helper for composing multiple FS layers without manual nesting.
+
+### Fixed
+
+- `ObjectFS.Access` no longer returns `(nil, nil)` when `AccessFunc` returns
+  nil; it falls back to presign/baseURL strategies.
+- `NewS3Client` and `NewObjectFSFromConfig` now return a clear error when
+  `cfg` is nil instead of panicking.
+- `ObjectFS.List` and `ObjectFS.BatchDelete` now check `ctx.Err()` in
+  pagination/batching loops for proper cancellation support.
+- `MountTable` methods now check context cancellation at entry.
+- Added missing `var _ FS = (*ObjectFS)(nil)` compile-time interface check.
+
+## [v0.1.1] - 2026-03-06
 
 ### Changed
-- `NewLocalFS` now returns `(*LocalFS, error)` instead of `*LocalFS` — **breaking change**.
-- `FS.Delete` contract clarified: behaviour on missing key is backend-specific.
-- `FS.List` now returns only immediate children (shallow listing) across all backends.
-- `ObjectFS.List` uses S3 `Delimiter` for shallow listing with `CommonPrefixes` as directories.
-- `zip.FS.List` updated to shallow semantics matching the core interface.
-- `ZipFS` renamed to `FS` in the zip plugin to avoid stuttering (`zip.FS` instead of `zip.ZipFS`).
-- `LocalFS` methods now check `ctx.Err()` before performing I/O.
-- `Pack` function uses named return + defer for reliable `zip.Writer` cleanup.
-- `mapOSError` expanded to map `os.IsPermission` to `ErrPermission`.
-- Compile-time interface checks added for `LocalFS` (`FS`, `Copier`).
-- `S3API` interface now includes `DeleteObjects`.
-- README examples updated with proper error handling.
+
+- Dependency updates (GitHub Actions).
+
+## [v0.1.0] - 2026-03-05
+
+### Added
+
+- Initial release.
+- `FS` interface with Get, Put, Delete, List, Stat, Access.
+- `LocalFS` backend (local directory).
+- `ObjectFS` backend (S3-compatible object store).
+- `Copier`, `Presigner`, `BatchDeleter` optional interfaces.
+- `MountTable` multi-backend routing.
+- `Schema` declarative key routing.
+- `WithHooks` operation interceptors.
+- `Walk`, `Copy`, `BatchDelete`, `Exists` helper functions.
+- `plugin/zip` read-only zip archive FS.
+
+[v0.1.2]: https://github.com/lin-snow/VireFS/compare/v0.1.1...v0.1.2
+[v0.1.1]: https://github.com/lin-snow/VireFS/compare/v0.1.0...v0.1.1
+[v0.1.0]: https://github.com/lin-snow/VireFS/releases/tag/v0.1.0
