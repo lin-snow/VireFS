@@ -13,7 +13,7 @@ jobs:
   update-go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Get latest stable Go version
         id: latest
