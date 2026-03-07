@@ -24,10 +24,10 @@ type FS struct {
 // compile-time interface check
 var _ virefs.FS = (*FS)(nil)
 
-// OpenFS opens a zip file at path and returns a read-only FS.
+// OpenFS opens a zip file at filePath and returns a read-only FS.
 // The caller must call Close when done.
-func OpenFS(path string) (*FS, error) {
-	f, err := os.Open(path)
+func OpenFS(filePath string) (*FS, error) {
+	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
