@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v0.1.3] - 2026-03-07
+
+### Changed
+
+- Bump minimum Go version to 1.26.0.
+
 ## [v0.1.2] - 2026-03-07
 
 ### Breaking Changes
@@ -61,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `Walk`, `Copy`, `BatchDelete`, `Exists` helper functions.
 - `plugin/zip` read-only zip archive FS.
 
+[v0.1.3]: https://github.com/lin-snow/VireFS/compare/v0.1.2...v0.1.3
 [v0.1.2]: https://github.com/lin-snow/VireFS/compare/v0.1.1...v0.1.2
 [v0.1.1]: https://github.com/lin-snow/VireFS/compare/v0.1.0...v0.1.1
 [v0.1.0]: https://github.com/lin-snow/VireFS/releases/tag/v0.1.0
