@@ -113,7 +113,7 @@ func TestSchema_IntegrationLocalFS(t *testing.T) {
 	)
 
 	dir := t.TempDir()
-	fs := NewLocalFS(dir, WithLocalKeyFunc(schema.Resolve))
+	fs := mustNewLocalFS(t, dir, WithLocalKeyFunc(schema.Resolve))
 	ctx := context.Background()
 
 	_ = fs.Put(ctx, "cat.jpg", strings.NewReader("img"))

@@ -15,6 +15,7 @@ var (
 	ErrInvalidKey   = errors.New("virefs: invalid key")
 	ErrAlreadyExist = errors.New("virefs: already exists")
 	ErrNotSupported = errors.New("virefs: operation not supported")
+	ErrPermission   = errors.New("virefs: permission denied")
 )
 
 // FileInfo describes a single object / file stored in a FS.
@@ -42,11 +43,13 @@ type FS interface {
 	Put(ctx context.Context, key string, r io.Reader, opts ...PutOption) error
 
 	// Delete removes the object addressed by key.
-	// Returns ErrNotFound if the key does not exist.
+	// Behaviour when the key does not exist is backend-specific:
+	// LocalFS returns ErrNotFound; ObjectFS silently succeeds (S3 idempotent delete).
 	Delete(ctx context.Context, key string) error
 
-	// List returns objects whose keys start with prefix.
-	// Pass an empty prefix to list everything under the root.
+	// List returns immediate children (files and sub-directories) under prefix.
+	// Sub-directories are returned as FileInfo with IsDir == true.
+	// Pass an empty prefix to list the root level.
 	List(ctx context.Context, prefix string) (*ListResult, error)
 
 	// Stat returns metadata for a single key.

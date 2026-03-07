@@ -38,7 +38,10 @@ func makeZipBytes(t *testing.T, files map[string]string) []byte {
 func seedLocalFS(t *testing.T, files map[string]string) *virefs.LocalFS {
 	t.Helper()
 	dir := t.TempDir()
-	fs := virefs.NewLocalFS(dir)
+	fs, err := virefs.NewLocalFS(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	for k, v := range files {
 		if err := fs.Put(ctx, k, strings.NewReader(v)); err != nil {
@@ -223,7 +226,10 @@ func TestUnpack(t *testing.T) {
 		"x.txt":     "X",
 		"sub/y.txt": "Y",
 	})
-	dst := virefs.NewLocalFS(t.TempDir())
+	dst, err := virefs.NewLocalFS(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	r := bytes.NewReader(data)
 
@@ -241,7 +247,10 @@ func TestUnpack(t *testing.T) {
 
 func TestUnpack_NoPrefix(t *testing.T) {
 	data := makeZipBytes(t, map[string]string{"file.txt": "content"})
-	dst := virefs.NewLocalFS(t.TempDir())
+	dst, err := virefs.NewLocalFS(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	r := bytes.NewReader(data)
 
@@ -256,12 +265,15 @@ func TestUnpack_NoPrefix(t *testing.T) {
 
 func TestUnpack_ContextCancelled(t *testing.T) {
 	data := makeZipBytes(t, map[string]string{"a.txt": "a"})
-	dst := virefs.NewLocalFS(t.TempDir())
+	dst, err := virefs.NewLocalFS(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	r := bytes.NewReader(data)
 
-	err := Unpack(ctx, r, int64(len(data)), dst, "")
+	err = Unpack(ctx, r, int64(len(data)), dst, "")
 	if err == nil {
 		t.Fatal("Unpack with cancelled context should fail")
 	}
@@ -289,7 +301,10 @@ func TestPackUnpack_RoundTrip(t *testing.T) {
 		t.Fatalf("Pack: %v", err)
 	}
 
-	dst := virefs.NewLocalFS(t.TempDir())
+	dst, err := virefs.NewLocalFS(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	data := buf.Bytes()
 	r := bytes.NewReader(data)
 	if err := Unpack(ctx, r, int64(len(data)), dst, ""); err != nil {

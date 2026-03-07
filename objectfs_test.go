@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +24,7 @@ type fakeS3 struct {
 	objects      map[string][]byte
 	contentTypes map[string]string
 	metadata     map[string]map[string]string
+	maxKeys      int // if > 0, limits results per ListObjectsV2 call to simulate pagination
 }
 
 func newFakeS3() *fakeS3 {
@@ -97,21 +100,75 @@ func (f *fakeS3) HeadObject(_ context.Context, in *s3.HeadObjectInput, _ ...func
 
 func (f *fakeS3) ListObjectsV2(_ context.Context, in *s3.ListObjectsV2Input, _ ...func(*s3.Options)) (*s3.ListObjectsV2Output, error) {
 	prefix := aws.ToString(in.Prefix)
-	var contents []types.Object
-	for k, v := range f.objects {
-		if strings.HasPrefix(k, prefix) {
-			now := time.Now()
-			contents = append(contents, types.Object{
-				Key:          aws.String(k),
-				Size:         aws.Int64(int64(len(v))),
-				LastModified: &now,
-			})
-		}
+	delimiter := aws.ToString(in.Delimiter)
+
+	type entry struct {
+		key  string
+		data []byte
 	}
-	return &s3.ListObjectsV2Output{
-		Contents:    contents,
-		IsTruncated: aws.Bool(false),
-	}, nil
+	var matched []entry
+	commonPrefixSet := make(map[string]struct{})
+	var commonPrefixes []types.CommonPrefix
+
+	// Collect all matching keys, sorted for deterministic pagination.
+	keys := make([]string, 0, len(f.objects))
+	for k := range f.objects {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		if !strings.HasPrefix(k, prefix) {
+			continue
+		}
+		rest := k[len(prefix):]
+		if delimiter != "" {
+			if idx := strings.Index(rest, delimiter); idx >= 0 {
+				cp := prefix + rest[:idx+len(delimiter)]
+				if _, seen := commonPrefixSet[cp]; !seen {
+					commonPrefixSet[cp] = struct{}{}
+					commonPrefixes = append(commonPrefixes, types.CommonPrefix{
+						Prefix: aws.String(cp),
+					})
+				}
+				continue
+			}
+		}
+		matched = append(matched, entry{key: k, data: f.objects[k]})
+	}
+
+	// Handle pagination via ContinuationToken (token is a string-encoded offset).
+	startIdx := 0
+	if tok := aws.ToString(in.ContinuationToken); tok != "" {
+		startIdx, _ = strconv.Atoi(tok)
+	}
+
+	limit := len(matched)
+	if f.maxKeys > 0 && f.maxKeys < limit-startIdx {
+		limit = startIdx + f.maxKeys
+	}
+
+	var contents []types.Object
+	for i := startIdx; i < limit && i < len(matched); i++ {
+		now := time.Now()
+		contents = append(contents, types.Object{
+			Key:          aws.String(matched[i].key),
+			Size:         aws.Int64(int64(len(matched[i].data))),
+			LastModified: &now,
+		})
+	}
+
+	truncated := limit < len(matched)
+	out := &s3.ListObjectsV2Output{
+		Contents:       contents,
+		CommonPrefixes: commonPrefixes,
+		IsTruncated:    aws.Bool(truncated),
+	}
+	if truncated {
+		nextToken := strconv.Itoa(limit)
+		out.NextContinuationToken = aws.String(nextToken)
+	}
+	return out, nil
 }
 
 func TestObjectFS_PutGetDeleteStat(t *testing.T) {
@@ -552,5 +609,56 @@ func TestObjectFS_CrossBackendCopy(t *testing.T) {
 	rc.Close()
 	if string(data) != "cross" {
 		t.Fatalf("Cross copy content = %q, want %q", data, "cross")
+	}
+}
+
+func TestObjectFS_ListPagination(t *testing.T) {
+	fake := newFakeS3()
+	fake.maxKeys = 2
+	fs := NewObjectFS(fake, "bucket", WithPrefix("p/"))
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "a.txt", strings.NewReader("a"))
+	_ = fs.Put(ctx, "b.txt", strings.NewReader("b"))
+	_ = fs.Put(ctx, "c.txt", strings.NewReader("c"))
+	_ = fs.Put(ctx, "d.txt", strings.NewReader("d"))
+	_ = fs.Put(ctx, "e.txt", strings.NewReader("e"))
+
+	result, err := fs.List(ctx, "")
+	if err != nil {
+		t.Fatalf("List with pagination: %v", err)
+	}
+	if len(result.Files) != 5 {
+		t.Fatalf("List got %d entries, want 5", len(result.Files))
+	}
+}
+
+func TestObjectFS_ListShallow(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket", WithPrefix("root/"))
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "file.txt", strings.NewReader("top"))
+	_ = fs.Put(ctx, "sub/a.txt", strings.NewReader("a"))
+	_ = fs.Put(ctx, "sub/deep/b.txt", strings.NewReader("b"))
+
+	result, err := fs.List(ctx, "")
+	if err != nil {
+		t.Fatalf("List root: %v", err)
+	}
+
+	var files, dirs []string
+	for _, f := range result.Files {
+		if f.IsDir {
+			dirs = append(dirs, f.Key)
+		} else {
+			files = append(files, f.Key)
+		}
+	}
+	if len(files) != 1 || files[0] != "file.txt" {
+		t.Fatalf("files = %v, want [file.txt]", files)
+	}
+	if len(dirs) != 1 || dirs[0] != "sub" {
+		t.Fatalf("dirs = %v, want [sub]", dirs)
 	}
 }

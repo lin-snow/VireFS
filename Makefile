@@ -1,4 +1,4 @@
-.PHONY: all test test-v lint fmt vet tidy check cover clean help
+.PHONY: all test test-v lint lint-fix fmt fmt-fix vet tidy check cover clean help
 
 all: check test ## Run all checks and tests
 
@@ -17,18 +17,33 @@ cover: ## Run tests and open coverage report in browser
 
 ## ─── Code Quality ───────────────────────────────────────────────
 
-lint: fmt vet ## Run all linters (fmt + vet)
+lint: ## Run golangci-lint (install if missing)
+	@which golangci-lint > /dev/null 2>&1 || { \
+		echo "Installing golangci-lint..."; \
+		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest; \
+	}
+	golangci-lint run ./...
 
-fmt: ## Check formatting (fails if any file needs gofmt)
-	@unformatted=$$(gofmt -l .); \
-	if [ -n "$$unformatted" ]; then \
-		echo "Files need gofmt:"; \
-		echo "$$unformatted"; \
-		exit 1; \
-	fi
+lint-fix: ## Run golangci-lint with auto-fix
+	@which golangci-lint > /dev/null 2>&1 || { \
+		echo "Installing golangci-lint..."; \
+		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest; \
+	}
+	golangci-lint run --fix ./...
 
-fmt-fix: ## Auto-fix formatting
-	gofmt -w .
+fmt: ## Check formatting via golangci-lint formatters
+	@which golangci-lint > /dev/null 2>&1 || { \
+		echo "Installing golangci-lint..."; \
+		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest; \
+	}
+	golangci-lint fmt ./...
+
+fmt-fix: ## Auto-fix formatting via golangci-lint
+	@which golangci-lint > /dev/null 2>&1 || { \
+		echo "Installing golangci-lint..."; \
+		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest; \
+	}
+	golangci-lint fmt --fix ./...
 
 vet: ## Run go vet
 	go vet ./...
@@ -37,7 +52,7 @@ tidy: ## Tidy and verify go.mod
 	go mod tidy
 	@git diff --exit-code go.mod go.sum || (echo "go.mod/go.sum not tidy" && exit 1)
 
-check: tidy fmt vet ## Full pre-commit check (tidy + fmt + vet)
+check: tidy lint ## Full pre-commit check (tidy + lint)
 
 ## ─── Utilities ──────────────────────────────────────────────────
 

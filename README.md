@@ -77,7 +77,7 @@ type FS interface {
 
 | 后端 | 构造函数 | root 概念 |
 |---|---|---|
-| **LocalFS** | `NewLocalFS(rootDir, ...LocalOption)` | 指定的本地目录 |
+| **LocalFS** | `NewLocalFS(rootDir, ...LocalOption) (*LocalFS, error)` | 指定的本地目录 |
 | **ObjectFS** | `NewObjectFS(s3Client, bucket, ...ObjectOption)` | endpoint + bucket |
 
 ### 可选能力（类型断言）
@@ -130,7 +130,7 @@ import (
 
 func main() {
     ctx := context.Background()
-    fs := virefs.NewLocalFS("/tmp/mydata", virefs.WithCreateRoot())
+    fs, _ := virefs.NewLocalFS("/tmp/mydata", virefs.WithCreateRoot())
 
     // 写入
     _ = fs.Put(ctx, "hello.txt", strings.NewReader("world"))
@@ -252,7 +252,7 @@ if p, ok := fs.(virefs.Presigner); ok {
 启用后 Put 先写临时文件，再原子 rename，防止并发写入数据损坏。
 
 ```go
-fs := virefs.NewLocalFS("/data", virefs.WithAtomicWrite())
+fs, _ := virefs.NewLocalFS("/data", virefs.WithAtomicWrite())
 ```
 
 ### Key 变换（KeyFunc）
@@ -260,7 +260,7 @@ fs := virefs.NewLocalFS("/data", virefs.WithAtomicWrite())
 在 `CleanKey` 之后、实际存储操作之前，对 key 进行自定义变换：
 
 ```go
-fs := virefs.NewLocalFS("/data", virefs.WithLocalKeyFunc(func(key string) string {
+fs, _ := virefs.NewLocalFS("/data", virefs.WithLocalKeyFunc(func(key string) string {
     return time.Now().Format("2006/01/02") + "/" + key
 }))
 // Put("photo.jpg") → 实际写入 /data/2026/03/06/photo.jpg
@@ -279,7 +279,7 @@ schema := virefs.NewSchema(
 )
 
 // 通过 WithLocalKeyFunc / WithObjectKeyFunc 接入
-fs := virefs.NewLocalFS("/data", virefs.WithLocalKeyFunc(schema.Resolve))
+fs, _ := virefs.NewLocalFS("/data", virefs.WithLocalKeyFunc(schema.Resolve))
 
 fs.Put(ctx, "cat.jpg", r)       // → /data/images/cat.jpg
 fs.Put(ctx, "report.pdf", r)    // → /data/docs/report.pdf
@@ -310,7 +310,8 @@ virefs.RouteByFunc("archives/", func(key string) bool {
 
 ```go
 mt := virefs.NewMountTable()
-mt.Mount("local", virefs.NewLocalFS("/data/files"))
+local, _ := virefs.NewLocalFS("/data/files")
+mt.Mount("local", local)
 mt.Mount("s3",    virefs.NewObjectFS(s3Client, "my-bucket"))
 
 mt.Get(ctx, "local/reports/q1.csv")  // → LocalFS

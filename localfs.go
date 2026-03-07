@@ -46,10 +46,11 @@ type LocalFS struct {
 }
 
 // NewLocalFS creates a LocalFS rooted at the given directory.
-func NewLocalFS(root string, opts ...LocalOption) *LocalFS {
+// It returns an error if the absolute path cannot be resolved.
+func NewLocalFS(root string, opts ...LocalOption) (*LocalFS, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
-		abs = root
+		return nil, fmt.Errorf("virefs: resolve root %q: %w", root, err)
 	}
 	l := &LocalFS{
 		root:    abs,
@@ -61,7 +62,7 @@ func NewLocalFS(root string, opts ...LocalOption) *LocalFS {
 	if l.createRoot {
 		_ = os.MkdirAll(l.root, l.dirPerm)
 	}
-	return l
+	return l, nil
 }
 
 // fullPath resolves a cleaned key to an absolute local path and ensures it
@@ -247,10 +248,17 @@ func (l *LocalFS) Copy(_ context.Context, srcKey, dstKey string) error {
 	return nil
 }
 
+// Compile-time interface checks.
+var _ FS = (*LocalFS)(nil)
+var _ Copier = (*LocalFS)(nil)
+
 // mapOSError converts common os errors to virefs sentinel errors.
 func mapOSError(err error) error {
 	if os.IsNotExist(err) {
 		return ErrNotFound
+	}
+	if os.IsPermission(err) {
+		return ErrPermission
 	}
 	return err
 }

@@ -11,18 +11,21 @@ import (
 // Pack reads the listed keys from fsys and writes them into a zip archive
 // streamed to w. Keys are used as entry names inside the archive after
 // normalisation via virefs.CleanKey.
-func Pack(ctx context.Context, fsys virefs.FS, keys []string, w io.Writer) error {
+func Pack(ctx context.Context, fsys virefs.FS, keys []string, w io.Writer) (retErr error) {
 	zw := zip.NewWriter(w)
+	defer func() {
+		if cerr := zw.Close(); retErr == nil {
+			retErr = cerr
+		}
+	}()
 
 	for _, raw := range keys {
 		if err := ctx.Err(); err != nil {
-			zw.Close()
 			return err
 		}
 
 		key, err := virefs.CleanKey(raw)
 		if err != nil {
-			zw.Close()
 			return err
 		}
 
@@ -38,23 +41,20 @@ func Pack(ctx context.Context, fsys virefs.FS, keys []string, w io.Writer) error
 
 		ew, err := zw.CreateHeader(header)
 		if err != nil {
-			zw.Close()
 			return err
 		}
 
 		rc, err := fsys.Get(ctx, key)
 		if err != nil {
-			zw.Close()
 			return err
 		}
 
 		_, copyErr := io.Copy(ew, rc)
 		rc.Close()
 		if copyErr != nil {
-			zw.Close()
 			return copyErr
 		}
 	}
 
-	return zw.Close()
+	return nil
 }

@@ -192,12 +192,14 @@ func (o *ObjectFS) List(ctx context.Context, prefix string) (*ListResult, error)
 		s3Prefix += "/"
 	}
 
+	delimiter := "/"
 	result := &ListResult{}
 	var continuationToken *string
 	for {
 		out, err := o.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 			Bucket:            aws.String(o.bucket),
 			Prefix:            aws.String(s3Prefix),
+			Delimiter:         aws.String(delimiter),
 			ContinuationToken: continuationToken,
 		})
 		if err != nil {
@@ -212,6 +214,17 @@ func (o *ObjectFS) List(ctx context.Context, prefix string) (*ListResult, error)
 				Key:          k,
 				Size:         aws.ToInt64(obj.Size),
 				LastModified: aws.ToTime(obj.LastModified),
+			})
+		}
+		for _, cp := range out.CommonPrefixes {
+			k := aws.ToString(cp.Prefix)
+			if len(k) > len(o.basePrefix) {
+				k = k[len(o.basePrefix):]
+			}
+			k = strings.TrimSuffix(k, "/")
+			result.Files = append(result.Files, FileInfo{
+				Key:   k,
+				IsDir: true,
 			})
 		}
 		if !aws.ToBool(out.IsTruncated) {

@@ -1,0 +1,65 @@
+name: Go Version Update
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # every Monday 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Get latest stable Go version
+        id: latest
+        run: |
+          latest=$(curl -sL 'https://go.dev/dl/?mode=json' | jq -r '.[0].version' | sed 's/go//')
+          echo "version=$latest" >> "$GITHUB_OUTPUT"
+
+      - name: Get current Go version from go.mod
+        id: current
+        run: |
+          current=$(grep '^go ' go.mod | awk '{print $2}')
+          echo "version=$current" >> "$GITHUB_OUTPUT"
+
+      - name: Check if update needed
+        id: check
+        run: |
+          if [ "${{ steps.latest.outputs.version }}" = "${{ steps.current.outputs.version }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Go
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ steps.latest.outputs.version }}
+
+      - name: Update go.mod
+        if: steps.check.outputs.skip == 'false'
+        run: go mod tidy -go=${{ steps.latest.outputs.version }}
+
+      - name: Create Pull Request
+        if: steps.check.outputs.skip == 'false'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: deps/go-${{ steps.latest.outputs.version }}
+          commit-message: "deps: update Go to ${{ steps.latest.outputs.version }}"
+          title: "deps: update Go to ${{ steps.latest.outputs.version }}"
+          body: |
+            Automated PR to update Go version in `go.mod`.
+
+            - **Current**: `${{ steps.current.outputs.version }}`
+            - **Latest**: `${{ steps.latest.outputs.version }}`
+
+            Release notes: https://go.dev/doc/go${{ steps.latest.outputs.version }}
+          labels: |
+            dependencies
+            go

@@ -4,13 +4,24 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
+func mustNewLocalFS(t *testing.T, root string, opts ...LocalOption) *LocalFS {
+	t.Helper()
+	fs, err := NewLocalFS(root, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fs
+}
+
 func TestLocalFS_PutGetDeleteStat(t *testing.T) {
 	dir := t.TempDir()
-	fs := NewLocalFS(dir)
+	fs := mustNewLocalFS(t, dir)
 	ctx := context.Background()
 
 	// Put
@@ -55,7 +66,7 @@ func TestLocalFS_PutGetDeleteStat(t *testing.T) {
 
 func TestLocalFS_List(t *testing.T) {
 	dir := t.TempDir()
-	fs := NewLocalFS(dir)
+	fs := mustNewLocalFS(t, dir)
 	ctx := context.Background()
 
 	_ = fs.Put(ctx, "a.txt", strings.NewReader("a"))
@@ -83,7 +94,7 @@ func TestLocalFS_List(t *testing.T) {
 
 func TestLocalFS_NestedPut(t *testing.T) {
 	dir := t.TempDir()
-	fs := NewLocalFS(dir)
+	fs := mustNewLocalFS(t, dir)
 	ctx := context.Background()
 
 	if err := fs.Put(ctx, "a/b/c/d.txt", strings.NewReader("deep")); err != nil {
@@ -102,7 +113,7 @@ func TestLocalFS_NestedPut(t *testing.T) {
 
 func TestLocalFS_WithKeyFunc(t *testing.T) {
 	dir := t.TempDir()
-	fs := NewLocalFS(dir, WithLocalKeyFunc(func(key string) string {
+	fs := mustNewLocalFS(t, dir, WithLocalKeyFunc(func(key string) string {
 		return "transformed/" + key
 	}))
 	ctx := context.Background()
@@ -121,7 +132,7 @@ func TestLocalFS_WithKeyFunc(t *testing.T) {
 		t.Fatalf("Get content = %q, want %q", data, "hello")
 	}
 
-	plain := NewLocalFS(dir)
+	plain := mustNewLocalFS(t, dir)
 	rc, err = plain.Get(ctx, "transformed/note.txt")
 	if err != nil {
 		t.Fatalf("plain Get transformed path: %v", err)
@@ -135,7 +146,7 @@ func TestLocalFS_WithKeyFunc(t *testing.T) {
 
 func TestLocalFS_Access(t *testing.T) {
 	dir := t.TempDir()
-	fs := NewLocalFS(dir)
+	fs := mustNewLocalFS(t, dir)
 	ctx := context.Background()
 
 	_ = fs.Put(ctx, "doc/readme.txt", strings.NewReader("hello"))
@@ -157,7 +168,7 @@ func TestLocalFS_Access(t *testing.T) {
 
 func TestLocalFS_AccessWithKeyFunc(t *testing.T) {
 	dir := t.TempDir()
-	fs := NewLocalFS(dir, WithLocalKeyFunc(func(key string) string {
+	fs := mustNewLocalFS(t, dir, WithLocalKeyFunc(func(key string) string {
 		return "v2/" + key
 	}))
 	ctx := context.Background()
@@ -173,7 +184,7 @@ func TestLocalFS_AccessWithKeyFunc(t *testing.T) {
 
 func TestLocalFS_TraversalRejected(t *testing.T) {
 	dir := t.TempDir()
-	fs := NewLocalFS(dir)
+	fs := mustNewLocalFS(t, dir)
 	ctx := context.Background()
 
 	_, err := fs.Get(ctx, "../../etc/passwd")
@@ -187,7 +198,7 @@ func TestLocalFS_TraversalRejected(t *testing.T) {
 
 func TestLocalFS_AtomicWrite(t *testing.T) {
 	dir := t.TempDir()
-	fs := NewLocalFS(dir, WithAtomicWrite())
+	fs := mustNewLocalFS(t, dir, WithAtomicWrite())
 	ctx := context.Background()
 
 	if err := fs.Put(ctx, "atomic.txt", strings.NewReader("safe")); err != nil {
@@ -206,7 +217,7 @@ func TestLocalFS_AtomicWrite(t *testing.T) {
 
 func TestLocalFS_AtomicWriteNested(t *testing.T) {
 	dir := t.TempDir()
-	fs := NewLocalFS(dir, WithAtomicWrite())
+	fs := mustNewLocalFS(t, dir, WithAtomicWrite())
 	ctx := context.Background()
 
 	if err := fs.Put(ctx, "a/b/c.txt", strings.NewReader("deep")); err != nil {
@@ -225,7 +236,7 @@ func TestLocalFS_AtomicWriteNested(t *testing.T) {
 
 func TestLocalFS_Copy(t *testing.T) {
 	dir := t.TempDir()
-	fs := NewLocalFS(dir)
+	fs := mustNewLocalFS(t, dir)
 	ctx := context.Background()
 
 	_ = fs.Put(ctx, "original.txt", strings.NewReader("data"))
@@ -253,7 +264,7 @@ func TestLocalFS_Copy(t *testing.T) {
 
 func TestLocalFS_CopyNested(t *testing.T) {
 	dir := t.TempDir()
-	fs := NewLocalFS(dir)
+	fs := mustNewLocalFS(t, dir)
 	ctx := context.Background()
 
 	_ = fs.Put(ctx, "src/file.txt", strings.NewReader("nested"))
@@ -275,7 +286,7 @@ func TestLocalFS_CopyNested(t *testing.T) {
 
 func TestLocalFS_Exists(t *testing.T) {
 	dir := t.TempDir()
-	fs := NewLocalFS(dir)
+	fs := mustNewLocalFS(t, dir)
 	ctx := context.Background()
 
 	_ = fs.Put(ctx, "exists.txt", strings.NewReader("yes"))
@@ -299,7 +310,7 @@ func TestLocalFS_Exists(t *testing.T) {
 
 func TestLocalFS_CopyHelper_SameBackend(t *testing.T) {
 	dir := t.TempDir()
-	fs := NewLocalFS(dir)
+	fs := mustNewLocalFS(t, dir)
 	ctx := context.Background()
 
 	_ = fs.Put(ctx, "a.txt", strings.NewReader("hello"))
@@ -316,5 +327,79 @@ func TestLocalFS_CopyHelper_SameBackend(t *testing.T) {
 	rc.Close()
 	if string(data) != "hello" {
 		t.Fatalf("content = %q, want %q", data, "hello")
+	}
+}
+
+func TestLocalFS_DeleteNotFound(t *testing.T) {
+	dir := t.TempDir()
+	fs := mustNewLocalFS(t, dir)
+	ctx := context.Background()
+
+	err := fs.Delete(ctx, "nonexistent.txt")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Delete missing key error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestLocalFS_WithCreateRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "nested", "dir")
+	fs := mustNewLocalFS(t, root, WithCreateRoot())
+	ctx := context.Background()
+
+	if err := fs.Put(ctx, "test.txt", strings.NewReader("created")); err != nil {
+		t.Fatalf("Put after WithCreateRoot: %v", err)
+	}
+	rc, err := fs.Get(ctx, "test.txt")
+	if err != nil {
+		t.Fatalf("Get after WithCreateRoot: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "created" {
+		t.Fatalf("content = %q, want %q", data, "created")
+	}
+}
+
+func TestLocalFS_WithDirPerm(t *testing.T) {
+	root := t.TempDir()
+	perm := os.FileMode(0o700)
+	fs := mustNewLocalFS(t, root, WithDirPerm(perm))
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "sub/file.txt", strings.NewReader("data"))
+
+	info, err := os.Stat(filepath.Join(root, "sub"))
+	if err != nil {
+		t.Fatalf("Stat sub dir: %v", err)
+	}
+	got := info.Mode().Perm()
+	if got != perm {
+		t.Fatalf("dir perm = %o, want %o", got, perm)
+	}
+}
+
+func TestLocalFS_ListShallow(t *testing.T) {
+	dir := t.TempDir()
+	fs := mustNewLocalFS(t, dir)
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "a.txt", strings.NewReader("a"))
+	_ = fs.Put(ctx, "sub/b.txt", strings.NewReader("b"))
+	_ = fs.Put(ctx, "sub/deep/c.txt", strings.NewReader("c"))
+
+	result, err := fs.List(ctx, "")
+	if err != nil {
+		t.Fatalf("List root: %v", err)
+	}
+	if len(result.Files) != 2 {
+		t.Fatalf("List root got %d entries, want 2 (a.txt + sub/)", len(result.Files))
+	}
+
+	result, err = fs.List(ctx, "sub")
+	if err != nil {
+		t.Fatalf("List sub: %v", err)
+	}
+	if len(result.Files) != 2 {
+		t.Fatalf("List sub got %d entries, want 2 (b.txt + deep/)", len(result.Files))
 	}
 }
