@@ -85,6 +85,13 @@ func (f *fakeS3) DeleteObject(_ context.Context, in *s3.DeleteObjectInput, _ ...
 	return &s3.DeleteObjectOutput{}, nil
 }
 
+func (f *fakeS3) DeleteObjects(_ context.Context, in *s3.DeleteObjectsInput, _ ...func(*s3.Options)) (*s3.DeleteObjectsOutput, error) {
+	for _, obj := range in.Delete.Objects {
+		delete(f.objects, aws.ToString(obj.Key))
+	}
+	return &s3.DeleteObjectsOutput{}, nil
+}
+
 func (f *fakeS3) HeadObject(_ context.Context, in *s3.HeadObjectInput, _ ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
 	key := aws.ToString(in.Key)
 	data, ok := f.objects[key]
@@ -660,5 +667,51 @@ func TestObjectFS_ListShallow(t *testing.T) {
 	}
 	if len(dirs) != 1 || dirs[0] != "sub" {
 		t.Fatalf("dirs = %v, want [sub]", dirs)
+	}
+}
+
+func TestObjectFS_BatchDelete(t *testing.T) {
+	fake := newFakeS3()
+	fs := NewObjectFS(fake, "bucket", WithPrefix("pfx/"))
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "a.txt", strings.NewReader("a"))
+	_ = fs.Put(ctx, "b.txt", strings.NewReader("b"))
+	_ = fs.Put(ctx, "c.txt", strings.NewReader("c"))
+
+	if err := BatchDelete(ctx, fs, []string{"a.txt", "b.txt"}); err != nil {
+		t.Fatalf("BatchDelete: %v", err)
+	}
+
+	if _, ok := fake.objects["pfx/a.txt"]; ok {
+		t.Fatal("a.txt should be deleted")
+	}
+	if _, ok := fake.objects["pfx/b.txt"]; ok {
+		t.Fatal("b.txt should be deleted")
+	}
+	if _, ok := fake.objects["pfx/c.txt"]; !ok {
+		t.Fatal("c.txt should still exist")
+	}
+}
+
+func TestBatchDelete_Fallback(t *testing.T) {
+	dir := t.TempDir()
+	fs := mustNewLocalFS(t, dir)
+	ctx := context.Background()
+
+	_ = fs.Put(ctx, "x.txt", strings.NewReader("x"))
+	_ = fs.Put(ctx, "y.txt", strings.NewReader("y"))
+
+	if err := BatchDelete(ctx, fs, []string{"x.txt", "y.txt"}); err != nil {
+		t.Fatalf("BatchDelete fallback: %v", err)
+	}
+
+	ok, _ := Exists(ctx, fs, "x.txt")
+	if ok {
+		t.Fatal("x.txt should be deleted")
+	}
+	ok, _ = Exists(ctx, fs, "y.txt")
+	if ok {
+		t.Fatal("y.txt should be deleted")
 	}
 }

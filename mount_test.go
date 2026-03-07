@@ -191,3 +191,51 @@ func TestMountTable_ConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestMountTable_Copy_SameBackend(t *testing.T) {
+	mt := NewMountTable()
+	local := mustNewLocalFS(t, t.TempDir())
+	_ = mt.Mount("fs", local)
+	ctx := context.Background()
+
+	_ = mt.Put(ctx, "fs/src.txt", strings.NewReader("copy-me"))
+
+	if err := mt.Copy(ctx, "fs/src.txt", "fs/dst.txt"); err != nil {
+		t.Fatalf("Copy same backend: %v", err)
+	}
+
+	rc, err := mt.Get(ctx, "fs/dst.txt")
+	if err != nil {
+		t.Fatalf("Get dst: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "copy-me" {
+		t.Fatalf("content = %q, want %q", data, "copy-me")
+	}
+}
+
+func TestMountTable_Copy_CrossBackend(t *testing.T) {
+	mt := NewMountTable()
+	local1 := mustNewLocalFS(t, t.TempDir())
+	local2 := mustNewLocalFS(t, t.TempDir())
+	_ = mt.Mount("a", local1)
+	_ = mt.Mount("b", local2)
+	ctx := context.Background()
+
+	_ = mt.Put(ctx, "a/file.txt", strings.NewReader("cross"))
+
+	if err := mt.Copy(ctx, "a/file.txt", "b/file.txt"); err != nil {
+		t.Fatalf("Copy cross backend: %v", err)
+	}
+
+	rc, err := mt.Get(ctx, "b/file.txt")
+	if err != nil {
+		t.Fatalf("Get from b: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "cross" {
+		t.Fatalf("content = %q, want %q", data, "cross")
+	}
+}

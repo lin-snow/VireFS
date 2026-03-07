@@ -101,12 +101,35 @@ func (z *ZipFS) List(_ context.Context, prefix string) (*virefs.ListResult, erro
 	if err != nil {
 		return nil, &virefs.OpError{Op: "List", Key: prefix, Err: err}
 	}
+
+	dirSeen := make(map[string]struct{})
 	result := &virefs.ListResult{}
 	for k, f := range z.index {
-		if cleanedPrefix != "" && !strings.HasPrefix(k, cleanedPrefix+"/") && k != cleanedPrefix {
+		var rest string
+		if cleanedPrefix == "" {
+			rest = k
+		} else if strings.HasPrefix(k, cleanedPrefix+"/") {
+			rest = k[len(cleanedPrefix)+1:]
+		} else {
 			continue
 		}
-		result.Files = append(result.Files, fileInfoFromZip(k, f))
+
+		if idx := strings.Index(rest, "/"); idx >= 0 {
+			dirName := rest[:idx]
+			dirKey := dirName
+			if cleanedPrefix != "" {
+				dirKey = cleanedPrefix + "/" + dirName
+			}
+			if _, seen := dirSeen[dirKey]; !seen {
+				dirSeen[dirKey] = struct{}{}
+				result.Files = append(result.Files, virefs.FileInfo{
+					Key:   dirKey,
+					IsDir: true,
+				})
+			}
+		} else {
+			result.Files = append(result.Files, fileInfoFromZip(k, f))
+		}
 	}
 	return result, nil
 }

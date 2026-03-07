@@ -111,6 +111,32 @@ type Copier interface {
 	Copy(ctx context.Context, srcKey, dstKey string) error
 }
 
+// BatchDeleter is an optional interface for efficient bulk deletion.
+// ObjectFS implements this using S3 DeleteObjects.
+// Use a type assertion to check: if bd, ok := fs.(BatchDeleter); ok { ... }
+type BatchDeleter interface {
+	BatchDelete(ctx context.Context, keys []string) error
+}
+
+// BatchDelete deletes multiple keys from fsys. If fsys implements
+// BatchDeleter, the native bulk operation is used. Otherwise it falls
+// back to calling Delete for each key individually, returning the first
+// error encountered.
+func BatchDelete(ctx context.Context, fsys FS, keys []string) error {
+	if bd, ok := fsys.(BatchDeleter); ok {
+		return bd.BatchDelete(ctx, keys)
+	}
+	for _, key := range keys {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := fsys.Delete(ctx, key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Copy copies a file from src to dst. If src and dst are the same FS instance
 // and it implements Copier, the native (efficient) copy is used. Otherwise it
 // falls back to Get + Put.

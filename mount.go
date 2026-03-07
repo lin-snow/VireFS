@@ -127,3 +127,32 @@ func (mt *MountTable) Access(ctx context.Context, key string) (*AccessInfo, erro
 	}
 	return fs.Access(ctx, sub)
 }
+
+// Copy implements Copier. When both keys resolve to the same underlying FS
+// and that FS implements Copier, the native copy is used. Otherwise it
+// falls back to Get + Put.
+func (mt *MountTable) Copy(ctx context.Context, srcKey, dstKey string) error {
+	srcFS, srcSub, err := mt.resolve(srcKey)
+	if err != nil {
+		return err
+	}
+	dstFS, dstSub, err := mt.resolve(dstKey)
+	if err != nil {
+		return err
+	}
+	if srcFS == dstFS {
+		if c, ok := srcFS.(Copier); ok {
+			return c.Copy(ctx, srcSub, dstSub)
+		}
+	}
+	rc, err := srcFS.Get(ctx, srcSub)
+	if err != nil {
+		return fmt.Errorf("mount copy: get %q: %w", srcKey, err)
+	}
+	defer rc.Close()
+	return dstFS.Put(ctx, dstSub, rc)
+}
+
+// Compile-time interface checks.
+var _ FS = (*MountTable)(nil)
+var _ Copier = (*MountTable)(nil)

@@ -85,7 +85,8 @@ type FS interface {
 | 接口 | 说明 | 实现者 |
 |---|---|---|
 | `Presigner` | 生成预签名上传/下载 URL | ObjectFS |
-| `Copier` | 同后端高效复制 | LocalFS, ObjectFS |
+| `Copier` | 同后端高效复制 | LocalFS, ObjectFS, MountTable |
+| `BatchDeleter` | 批量删除 | ObjectFS（S3 DeleteObjects） |
 
 ### 错误模型
 
@@ -95,6 +96,7 @@ type FS interface {
 | `ErrInvalidKey` | key 包含非法模式（如 `..`） |
 | `ErrAlreadyExist` | 资源已存在（保留） |
 | `ErrNotSupported` | 当前后端不支持此操作 |
+| `ErrPermission` | 权限不足 |
 
 所有后端错误都被包装为 `*OpError{Op, Key, Err}`，方便定位问题。
 
@@ -123,6 +125,7 @@ import (
     "context"
     "fmt"
     "io"
+    "log"
     "strings"
 
     virefs "github.com/lin-snow/VireFS"
@@ -130,19 +133,30 @@ import (
 
 func main() {
     ctx := context.Background()
-    fs, _ := virefs.NewLocalFS("/tmp/mydata", virefs.WithCreateRoot())
+    fs, err := virefs.NewLocalFS("/tmp/mydata", virefs.WithCreateRoot())
+    if err != nil {
+        log.Fatal(err)
+    }
 
     // 写入
-    _ = fs.Put(ctx, "hello.txt", strings.NewReader("world"))
+    if err := fs.Put(ctx, "hello.txt", strings.NewReader("world")); err != nil {
+        log.Fatal(err)
+    }
 
     // 读取
-    rc, _ := fs.Get(ctx, "hello.txt")
+    rc, err := fs.Get(ctx, "hello.txt")
+    if err != nil {
+        log.Fatal(err)
+    }
     defer rc.Close()
     data, _ := io.ReadAll(rc)
     fmt.Println(string(data)) // "world"
 
     // 获取本地路径
-    info, _ := fs.Access(ctx, "hello.txt")
+    info, err := fs.Access(ctx, "hello.txt")
+    if err != nil {
+        log.Fatal(err)
+    }
     fmt.Println(info.Path) // "/tmp/mydata/hello.txt"
 }
 ```
@@ -150,7 +164,10 @@ func main() {
 ### 对象存储（S3 / MinIO / R2）
 
 ```go
-cfg, _ := config.LoadDefaultConfig(ctx)
+cfg, err := config.LoadDefaultConfig(ctx)
+if err != nil {
+    log.Fatal(err)
+}
 client := s3.NewFromConfig(cfg, func(o *s3.Options) {
     o.BaseEndpoint = aws.String("https://s3.example.com")
     o.UsePathStyle = true
@@ -159,10 +176,12 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 fs := virefs.NewObjectFS(client, "my-bucket", virefs.WithPrefix("uploads/"))
 
 // 上传并指定 ContentType
-_ = fs.Put(ctx, "photo.jpg", file,
+if err := fs.Put(ctx, "photo.jpg", file,
     virefs.WithContentType("image/jpeg"),
     virefs.WithMetadata(map[string]string{"user": "alice"}),
-)
+); err != nil {
+    log.Fatal(err)
+}
 ```
 
 ## 功能详解
@@ -172,7 +191,7 @@ _ = fs.Put(ctx, "photo.jpg", file,
 ObjectFS 会将这些信息传递给 S3 PutObject；LocalFS 会忽略它们（本地文件系统无此概念）。
 
 ```go
-_ = fs.Put(ctx, "report.pdf", file,
+err := fs.Put(ctx, "report.pdf", file,
     virefs.WithContentType("application/pdf"),
     virefs.WithMetadata(map[string]string{"version": "2"}),
 )
@@ -183,7 +202,7 @@ _ = fs.Put(ctx, "report.pdf", file,
 包级别便捷函数，内部调用 `Stat`，将 `ErrNotFound` 转为 `false`。
 
 ```go
-ok, _ := virefs.Exists(ctx, fs, "maybe.txt")
+ok, err := virefs.Exists(ctx, fs, "maybe.txt")
 ```
 
 ### Copy — 文件复制
@@ -192,10 +211,10 @@ ok, _ := virefs.Exists(ctx, fs, "maybe.txt")
 
 ```go
 // 同后端（S3 内部复制，无需下载再上传）
-_ = virefs.Copy(ctx, objFS, "src.txt", objFS, "dst.txt")
+err := virefs.Copy(ctx, objFS, "src.txt", objFS, "dst.txt")
 
 // 跨后端（本地 → S3）
-_ = virefs.Copy(ctx, localFS, "export.csv", objFS, "imports/export.csv",
+err = virefs.Copy(ctx, localFS, "export.csv", objFS, "imports/export.csv",
     virefs.WithContentType("text/csv"),
 )
 ```
@@ -211,11 +230,11 @@ _ = virefs.Copy(ctx, localFS, "export.csv", objFS, "imports/export.csv",
 
 ```go
 // LocalFS
-info, _ := localFS.Access(ctx, "doc.pdf")
+info, err := localFS.Access(ctx, "doc.pdf")
 fmt.Println(info.Path) // "/data/doc.pdf"
 
 // ObjectFS（自动选择：AccessFunc > Presign > BaseURL）
-info, _ = objFS.Access(ctx, "doc.pdf")
+info, err = objFS.Access(ctx, "doc.pdf")
 fmt.Println(info.URL)
 ```
 
@@ -241,9 +260,9 @@ fs := virefs.NewObjectFS(client, "bucket",
 )
 
 if p, ok := fs.(virefs.Presigner); ok {
-    get, _ := p.PresignGet(ctx, "secret.pdf", 15*time.Minute)
-    put, _ := p.PresignPut(ctx, "upload.zip", 30*time.Minute)
-    fmt.Println(get.URL, put.URL)
+    get, err := p.PresignGet(ctx, "secret.pdf", 15*time.Minute)
+    put, err := p.PresignPut(ctx, "upload.zip", 30*time.Minute)
+    fmt.Println(get.URL, put.URL, err)
 }
 ```
 
@@ -302,6 +321,30 @@ objFS := virefs.NewObjectFS(client, "bucket",
 virefs.RouteByFunc("archives/", func(key string) bool {
     return strings.HasSuffix(key, ".tar.gz") || strings.HasSuffix(key, ".zip")
 })
+```
+
+### Walk — 递归遍历
+
+递归列举 prefix 下的所有文件和目录（基于 `List` 的浅层语义递归展开）：
+
+```go
+err := virefs.Walk(ctx, fs, "", func(key string, info virefs.FileInfo, err error) error {
+    if err != nil {
+        return err
+    }
+    fmt.Println(key, info.Size)
+    return nil
+})
+```
+
+返回 `virefs.SkipDir` 可跳过指定子目录。
+
+### BatchDelete — 批量删除
+
+ObjectFS 使用 S3 `DeleteObjects` 实现高效批量删除，其他后端自动退化为逐个删除：
+
+```go
+err := virefs.BatchDelete(ctx, fs, []string{"a.txt", "b.txt", "c.txt"})
 ```
 
 ### MountTable — 多后端路由（可选）

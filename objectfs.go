@@ -21,6 +21,7 @@ type S3API interface {
 	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
 	DeleteObject(ctx context.Context, params *s3.DeleteObjectInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
+	DeleteObjects(ctx context.Context, params *s3.DeleteObjectsInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectsOutput, error)
 	HeadObject(ctx context.Context, params *s3.HeadObjectInput, optFns ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
 	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 	CopyObject(ctx context.Context, params *s3.CopyObjectInput, optFns ...func(*s3.Options)) (*s3.CopyObjectOutput, error)
@@ -363,9 +364,46 @@ func (o *ObjectFS) Copy(ctx context.Context, srcKey, dstKey string) error {
 	return nil
 }
 
+// BatchDelete implements BatchDeleter using S3 DeleteObjects for efficient
+// bulk deletion of up to 1000 keys per call.
+func (o *ObjectFS) BatchDelete(ctx context.Context, keys []string) error {
+	const maxBatch = 1000
+	for i := 0; i < len(keys); i += maxBatch {
+		end := i + maxBatch
+		if end > len(keys) {
+			end = len(keys)
+		}
+		objects := make([]types.ObjectIdentifier, 0, end-i)
+		for _, key := range keys[i:end] {
+			s3k, err := o.s3Key(key)
+			if err != nil {
+				return &OpError{Op: "BatchDelete", Key: key, Err: err}
+			}
+			objects = append(objects, types.ObjectIdentifier{Key: aws.String(s3k)})
+		}
+		out, err := o.client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+			Bucket: aws.String(o.bucket),
+			Delete: &types.Delete{Objects: objects, Quiet: aws.Bool(true)},
+		})
+		if err != nil {
+			return &OpError{Op: "BatchDelete", Key: fmt.Sprintf("%d keys", end-i), Err: mapS3Error(err)}
+		}
+		if len(out.Errors) > 0 {
+			e := out.Errors[0]
+			return &OpError{
+				Op:  "BatchDelete",
+				Key: aws.ToString(e.Key),
+				Err: fmt.Errorf("s3 error %s: %s", aws.ToString(e.Code), aws.ToString(e.Message)),
+			}
+		}
+	}
+	return nil
+}
+
 // Compile-time checks.
 var _ Presigner = (*ObjectFS)(nil)
 var _ Copier = (*ObjectFS)(nil)
+var _ BatchDeleter = (*ObjectFS)(nil)
 
 // mapS3Error converts common S3 error types to virefs sentinel errors.
 func mapS3Error(err error) error {

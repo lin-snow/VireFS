@@ -78,7 +78,7 @@ func (l *LocalFS) fullPath(key string) (string, error) {
 	joined := filepath.Join(l.root, filepath.FromSlash(cleaned))
 	abs, err := filepath.Abs(joined)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrInvalidKey, err)
+		return "", fmt.Errorf("%w: %w", ErrInvalidKey, err)
 	}
 	if !strings.HasPrefix(abs, l.root) {
 		return "", fmt.Errorf("%w: resolved path escapes root", ErrInvalidKey)
@@ -86,7 +86,10 @@ func (l *LocalFS) fullPath(key string) (string, error) {
 	return abs, nil
 }
 
-func (l *LocalFS) Get(_ context.Context, key string) (io.ReadCloser, error) {
+func (l *LocalFS) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, &OpError{Op: "Get", Key: key, Err: err}
+	}
 	p, err := l.fullPath(key)
 	if err != nil {
 		return nil, &OpError{Op: "Get", Key: key, Err: err}
@@ -98,7 +101,10 @@ func (l *LocalFS) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	return f, nil
 }
 
-func (l *LocalFS) Put(_ context.Context, key string, r io.Reader, _ ...PutOption) error {
+func (l *LocalFS) Put(ctx context.Context, key string, r io.Reader, _ ...PutOption) error {
+	if err := ctx.Err(); err != nil {
+		return &OpError{Op: "Put", Key: key, Err: err}
+	}
 	p, err := l.fullPath(key)
 	if err != nil {
 		return &OpError{Op: "Put", Key: key, Err: err}
@@ -146,7 +152,10 @@ func (l *LocalFS) putAtomic(target, dir, key string, r io.Reader) error {
 	return nil
 }
 
-func (l *LocalFS) Delete(_ context.Context, key string) error {
+func (l *LocalFS) Delete(ctx context.Context, key string) error {
+	if err := ctx.Err(); err != nil {
+		return &OpError{Op: "Delete", Key: key, Err: err}
+	}
 	p, err := l.fullPath(key)
 	if err != nil {
 		return &OpError{Op: "Delete", Key: key, Err: err}
@@ -157,7 +166,10 @@ func (l *LocalFS) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-func (l *LocalFS) List(_ context.Context, prefix string) (*ListResult, error) {
+func (l *LocalFS) List(ctx context.Context, prefix string) (*ListResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, &OpError{Op: "List", Key: prefix, Err: err}
+	}
 	cleanedPrefix, err := CleanKey(prefix)
 	if err != nil {
 		return nil, &OpError{Op: "List", Key: prefix, Err: err}
@@ -193,7 +205,10 @@ func (l *LocalFS) List(_ context.Context, prefix string) (*ListResult, error) {
 	return result, nil
 }
 
-func (l *LocalFS) Stat(_ context.Context, key string) (*FileInfo, error) {
+func (l *LocalFS) Stat(ctx context.Context, key string) (*FileInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, &OpError{Op: "Stat", Key: key, Err: err}
+	}
 	p, err := l.fullPath(key)
 	if err != nil {
 		return nil, &OpError{Op: "Stat", Key: key, Err: err}
@@ -210,7 +225,10 @@ func (l *LocalFS) Stat(_ context.Context, key string) (*FileInfo, error) {
 	}, nil
 }
 
-func (l *LocalFS) Access(_ context.Context, key string) (*AccessInfo, error) {
+func (l *LocalFS) Access(ctx context.Context, key string) (*AccessInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, &OpError{Op: "Access", Key: key, Err: err}
+	}
 	p, err := l.fullPath(key)
 	if err != nil {
 		return nil, &OpError{Op: "Access", Key: key, Err: err}
@@ -219,7 +237,10 @@ func (l *LocalFS) Access(_ context.Context, key string) (*AccessInfo, error) {
 }
 
 // Copy implements Copier for same-backend file copy.
-func (l *LocalFS) Copy(_ context.Context, srcKey, dstKey string) error {
+func (l *LocalFS) Copy(ctx context.Context, srcKey, dstKey string) error {
+	if err := ctx.Err(); err != nil {
+		return &OpError{Op: "Copy", Key: srcKey, Err: err}
+	}
 	srcPath, err := l.fullPath(srcKey)
 	if err != nil {
 		return &OpError{Op: "Copy", Key: srcKey, Err: err}

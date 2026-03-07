@@ -129,8 +129,9 @@ func TestZipFS_List(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List all: %v", err)
 	}
-	if len(res.Files) != 4 {
-		t.Fatalf("List all got %d, want 4", len(res.Files))
+	// Shallow: a.txt, other.txt, dir/ (directory)
+	if len(res.Files) != 3 {
+		t.Fatalf("List root got %d, want 3 (2 files + 1 dir)", len(res.Files))
 	}
 
 	res, err = zfs.List(ctx, "dir")
