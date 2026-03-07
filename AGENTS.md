@@ -18,7 +18,7 @@ virefs (根包)
 ├── schema.go        # Schema：声明式 key 路由（按扩展名/自定义函数）
 ├── *_test.go        # 对应的测试文件
 └── plugin/
-    └── zip/         # ZipFS 插件（只读 FS，基于 zip 归档）
+    └── zip/         # zip.FS 插件（只读 FS，基于 zip 归档）
         ├── zipfs.go
         ├── pack.go
         ├── unpack.go

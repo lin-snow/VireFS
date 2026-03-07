@@ -11,20 +11,20 @@ import (
 	virefs "github.com/lin-snow/VireFS"
 )
 
-// ZipFS is a read-only virefs.FS backed by a zip archive.
+// FS is a read-only virefs.FS backed by a zip archive.
 // Put, Delete and Access always return virefs.ErrNotSupported.
-type ZipFS struct {
+type FS struct {
 	r      *zip.Reader
 	closer io.Closer
 	index  map[string]*zip.File
 }
 
 // compile-time interface check
-var _ virefs.FS = (*ZipFS)(nil)
+var _ virefs.FS = (*FS)(nil)
 
 // OpenFS opens a zip file at path and returns a read-only FS.
 // The caller must call Close when done.
-func OpenFS(path string) (*ZipFS, error) {
+func OpenFS(path string) (*FS, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -39,7 +39,7 @@ func OpenFS(path string) (*ZipFS, error) {
 		f.Close()
 		return nil, err
 	}
-	return &ZipFS{
+	return &FS{
 		r:      zr,
 		closer: f,
 		index:  buildIndex(zr),
@@ -48,31 +48,32 @@ func OpenFS(path string) (*ZipFS, error) {
 
 // NewFS creates a read-only FS from an io.ReaderAt.
 // The caller is responsible for the lifetime of ra.
-func NewFS(ra io.ReaderAt, size int64) (*ZipFS, error) {
+func NewFS(ra io.ReaderAt, size int64) (*FS, error) {
 	zr, err := zip.NewReader(ra, size)
 	if err != nil {
 		return nil, err
 	}
-	return &ZipFS{
+	return &FS{
 		r:     zr,
 		index: buildIndex(zr),
 	}, nil
 }
 
 // NewFSFromBytes creates a read-only FS from in-memory bytes.
-func NewFSFromBytes(data []byte) (*ZipFS, error) {
+func NewFSFromBytes(data []byte) (*FS, error) {
 	return NewFS(bytes.NewReader(data), int64(len(data)))
 }
 
 // Close releases the underlying file handle if one was opened by OpenFS.
-func (z *ZipFS) Close() error {
+func (z *FS) Close() error {
 	if z.closer != nil {
 		return z.closer.Close()
 	}
 	return nil
 }
 
-func (z *ZipFS) Get(_ context.Context, key string) (io.ReadCloser, error) {
+// Get implements virefs.FS.
+func (z *FS) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	cleaned, err := virefs.CleanKey(key)
 	if err != nil {
 		return nil, &virefs.OpError{Op: "Get", Key: key, Err: err}
@@ -88,15 +89,18 @@ func (z *ZipFS) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	return rc, nil
 }
 
-func (z *ZipFS) Put(_ context.Context, key string, _ io.Reader, _ ...virefs.PutOption) error {
+// Put implements virefs.FS. Always returns ErrNotSupported.
+func (z *FS) Put(_ context.Context, key string, _ io.Reader, _ ...virefs.PutOption) error {
 	return &virefs.OpError{Op: "Put", Key: key, Err: virefs.ErrNotSupported}
 }
 
-func (z *ZipFS) Delete(_ context.Context, key string) error {
+// Delete implements virefs.FS. Always returns ErrNotSupported.
+func (z *FS) Delete(_ context.Context, key string) error {
 	return &virefs.OpError{Op: "Delete", Key: key, Err: virefs.ErrNotSupported}
 }
 
-func (z *ZipFS) List(_ context.Context, prefix string) (*virefs.ListResult, error) {
+// List implements virefs.FS.
+func (z *FS) List(_ context.Context, prefix string) (*virefs.ListResult, error) {
 	cleanedPrefix, err := virefs.CleanKey(prefix)
 	if err != nil {
 		return nil, &virefs.OpError{Op: "List", Key: prefix, Err: err}
@@ -106,11 +110,12 @@ func (z *ZipFS) List(_ context.Context, prefix string) (*virefs.ListResult, erro
 	result := &virefs.ListResult{}
 	for k, f := range z.index {
 		var rest string
-		if cleanedPrefix == "" {
+		switch {
+		case cleanedPrefix == "":
 			rest = k
-		} else if strings.HasPrefix(k, cleanedPrefix+"/") {
+		case strings.HasPrefix(k, cleanedPrefix+"/"):
 			rest = k[len(cleanedPrefix)+1:]
-		} else {
+		default:
 			continue
 		}
 
@@ -134,7 +139,8 @@ func (z *ZipFS) List(_ context.Context, prefix string) (*virefs.ListResult, erro
 	return result, nil
 }
 
-func (z *ZipFS) Stat(_ context.Context, key string) (*virefs.FileInfo, error) {
+// Stat implements virefs.FS.
+func (z *FS) Stat(_ context.Context, key string) (*virefs.FileInfo, error) {
 	cleaned, err := virefs.CleanKey(key)
 	if err != nil {
 		return nil, &virefs.OpError{Op: "Stat", Key: key, Err: err}
@@ -147,7 +153,8 @@ func (z *ZipFS) Stat(_ context.Context, key string) (*virefs.FileInfo, error) {
 	return &fi, nil
 }
 
-func (z *ZipFS) Access(_ context.Context, key string) (*virefs.AccessInfo, error) {
+// Access implements virefs.FS. Always returns ErrNotSupported.
+func (z *FS) Access(_ context.Context, key string) (*virefs.AccessInfo, error) {
 	return nil, &virefs.OpError{Op: "Access", Key: key, Err: virefs.ErrNotSupported}
 }
 

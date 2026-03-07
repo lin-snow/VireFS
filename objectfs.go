@@ -129,6 +129,7 @@ func (o *ObjectFS) s3Key(key string) (string, error) {
 	return o.basePrefix + cleaned, nil
 }
 
+// Get implements FS.
 func (o *ObjectFS) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	s3k, err := o.s3Key(key)
 	if err != nil {
@@ -144,6 +145,7 @@ func (o *ObjectFS) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	return out.Body, nil
 }
 
+// Put implements FS.
 func (o *ObjectFS) Put(ctx context.Context, key string, r io.Reader, opts ...PutOption) error {
 	s3k, err := o.s3Key(key)
 	if err != nil {
@@ -168,6 +170,7 @@ func (o *ObjectFS) Put(ctx context.Context, key string, r io.Reader, opts ...Put
 	return nil
 }
 
+// Delete implements FS.
 func (o *ObjectFS) Delete(ctx context.Context, key string) error {
 	s3k, err := o.s3Key(key)
 	if err != nil {
@@ -183,6 +186,7 @@ func (o *ObjectFS) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// List implements FS.
 func (o *ObjectFS) List(ctx context.Context, prefix string) (*ListResult, error) {
 	cleanedPrefix, err := CleanKey(prefix)
 	if err != nil {
@@ -236,6 +240,7 @@ func (o *ObjectFS) List(ctx context.Context, prefix string) (*ListResult, error)
 	return result, nil
 }
 
+// Stat implements FS.
 func (o *ObjectFS) Stat(ctx context.Context, key string) (*FileInfo, error) {
 	s3k, err := o.s3Key(key)
 	if err != nil {

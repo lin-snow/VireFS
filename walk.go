@@ -6,17 +6,17 @@ import (
 	"path"
 )
 
-// SkipDir is used as a return value from WalkFunc to indicate that the
+// ErrSkipDir is used as a return value from WalkFunc to indicate that the
 // directory named in the call is to be skipped. It is not returned as
 // an error by Walk itself.
-var SkipDir = errors.New("skip this directory")
+var ErrSkipDir = errors.New("skip this directory")
 
 // WalkFunc is the type of the function called by Walk to visit each file
 // or directory. The key argument is the full key of the entry. If there
 // was an error listing a directory, err will be non-nil and info may be
 // zero-valued.
 //
-// If WalkFunc returns SkipDir when invoked on a directory, Walk skips
+// If WalkFunc returns ErrSkipDir when invoked on a directory, Walk skips
 // that directory's contents. If WalkFunc returns any other non-nil error,
 // Walk stops entirely and returns that error.
 type WalkFunc func(key string, info FileInfo, err error) error
@@ -35,7 +35,7 @@ func Walk(ctx context.Context, fsys FS, prefix string, fn WalkFunc) error {
 		}
 		if fi.IsDir {
 			if err := fn(fi.Key, fi, nil); err != nil {
-				if errors.Is(err, SkipDir) {
+				if errors.Is(err, ErrSkipDir) {
 					continue
 				}
 				return err

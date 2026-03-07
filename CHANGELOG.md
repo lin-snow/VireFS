@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `Walk` helper function for recursive traversal of any FS.
-- `SkipDir` sentinel for skipping directories during Walk.
+- `ErrSkipDir` sentinel for skipping directories during Walk.
 - `BatchDeleter` optional interface and `BatchDelete` helper function.
 - `ObjectFS.BatchDelete` using S3 `DeleteObjects` for efficient bulk deletion.
 - `MountTable` now implements `Copier` — same-mount copies use native backend copy.
@@ -26,7 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `FS.Delete` contract clarified: behaviour on missing key is backend-specific.
 - `FS.List` now returns only immediate children (shallow listing) across all backends.
 - `ObjectFS.List` uses S3 `Delimiter` for shallow listing with `CommonPrefixes` as directories.
-- `ZipFS.List` updated to shallow semantics matching the core interface.
+- `zip.FS.List` updated to shallow semantics matching the core interface.
+- `ZipFS` renamed to `FS` in the zip plugin to avoid stuttering (`zip.FS` instead of `zip.ZipFS`).
 - `LocalFS` methods now check `ctx.Err()` before performing I/O.
 - `Pack` function uses named return + defer for reliable `zip.Writer` cleanup.
 - `mapOSError` expanded to map `os.IsPermission` to `ErrPermission`.

@@ -337,7 +337,7 @@ err := virefs.Walk(ctx, fs, "", func(key string, info virefs.FileInfo, err error
 })
 ```
 
-返回 `virefs.SkipDir` 可跳过指定子目录。
+返回 `virefs.ErrSkipDir` 可跳过指定子目录。
 
 ### BatchDelete — 批量删除
 

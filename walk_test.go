@@ -55,7 +55,7 @@ func TestWalk_SkipDir(t *testing.T) {
 			return err
 		}
 		if info.IsDir && key == "skip" {
-			return SkipDir
+			return ErrSkipDir
 		}
 		visited = append(visited, key)
 		return nil

@@ -66,9 +66,9 @@ func readAll(t *testing.T, fsys virefs.FS, key string) string {
 	return string(data)
 }
 
-// ---------- ZipFS tests ----------
+// ---------- FS tests ----------
 
-func TestZipFS_GetAndStat(t *testing.T) {
+func TestFS_GetAndStat(t *testing.T) {
 	data := makeZipBytes(t, map[string]string{
 		"hello.txt":     "world",
 		"sub/nested.md": "# Title",
@@ -99,7 +99,7 @@ func TestZipFS_GetAndStat(t *testing.T) {
 	}
 }
 
-func TestZipFS_GetNotFound(t *testing.T) {
+func TestFS_GetNotFound(t *testing.T) {
 	data := makeZipBytes(t, map[string]string{"a.txt": "a"})
 	zfs, err := NewFSFromBytes(data)
 	if err != nil {
@@ -112,7 +112,7 @@ func TestZipFS_GetNotFound(t *testing.T) {
 	}
 }
 
-func TestZipFS_List(t *testing.T) {
+func TestFS_List(t *testing.T) {
 	data := makeZipBytes(t, map[string]string{
 		"a.txt":     "a",
 		"dir/b.txt": "b",
@@ -143,7 +143,7 @@ func TestZipFS_List(t *testing.T) {
 	}
 }
 
-func TestZipFS_PutDeleteNotSupported(t *testing.T) {
+func TestFS_PutDeleteNotSupported(t *testing.T) {
 	data := makeZipBytes(t, map[string]string{"a.txt": "a"})
 	zfs, err := NewFSFromBytes(data)
 	if err != nil {
@@ -162,7 +162,7 @@ func TestZipFS_PutDeleteNotSupported(t *testing.T) {
 	}
 }
 
-func TestZipFS_EmptyArchive(t *testing.T) {
+func TestFS_EmptyArchive(t *testing.T) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	zw.Close()

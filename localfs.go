@@ -86,6 +86,7 @@ func (l *LocalFS) fullPath(key string) (string, error) {
 	return abs, nil
 }
 
+// Get implements FS.
 func (l *LocalFS) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, &OpError{Op: "Get", Key: key, Err: err}
@@ -101,6 +102,7 @@ func (l *LocalFS) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	return f, nil
 }
 
+// Put implements FS.
 func (l *LocalFS) Put(ctx context.Context, key string, r io.Reader, _ ...PutOption) error {
 	if err := ctx.Err(); err != nil {
 		return &OpError{Op: "Put", Key: key, Err: err}
@@ -152,6 +154,7 @@ func (l *LocalFS) putAtomic(target, dir, key string, r io.Reader) error {
 	return nil
 }
 
+// Delete implements FS.
 func (l *LocalFS) Delete(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
 		return &OpError{Op: "Delete", Key: key, Err: err}
@@ -166,6 +169,7 @@ func (l *LocalFS) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// List implements FS.
 func (l *LocalFS) List(ctx context.Context, prefix string) (*ListResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, &OpError{Op: "List", Key: prefix, Err: err}
@@ -205,6 +209,7 @@ func (l *LocalFS) List(ctx context.Context, prefix string) (*ListResult, error) 
 	return result, nil
 }
 
+// Stat implements FS.
 func (l *LocalFS) Stat(ctx context.Context, key string) (*FileInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, &OpError{Op: "Stat", Key: key, Err: err}
@@ -225,6 +230,7 @@ func (l *LocalFS) Stat(ctx context.Context, key string) (*FileInfo, error) {
 	}, nil
 }
 
+// Access implements FS.
 func (l *LocalFS) Access(ctx context.Context, key string) (*AccessInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, &OpError{Op: "Access", Key: key, Err: err}
