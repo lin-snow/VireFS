@@ -46,6 +46,7 @@ type hookFS struct {
 // Unwrap returns the underlying FS, bypassing all hooks.
 func (h *hookFS) Unwrap() FS { return h.inner }
 
+// Get implements FS. Applies WrapGet hook if set.
 func (h *hookFS) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	rc, err := h.inner.Get(ctx, key)
 	if err != nil {
@@ -57,6 +58,7 @@ func (h *hookFS) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	return rc, nil
 }
 
+// Put implements FS. Applies WrapPut hook if set.
 func (h *hookFS) Put(ctx context.Context, key string, r io.Reader, opts ...PutOption) error {
 	if h.hooks.WrapPut != nil {
 		r = h.hooks.WrapPut(key, r)
@@ -64,6 +66,7 @@ func (h *hookFS) Put(ctx context.Context, key string, r io.Reader, opts ...PutOp
 	return h.inner.Put(ctx, key, r, opts...)
 }
 
+// Delete implements FS. Calls OnDelete hook after successful deletion.
 func (h *hookFS) Delete(ctx context.Context, key string) error {
 	err := h.inner.Delete(ctx, key)
 	if err != nil {
@@ -75,10 +78,12 @@ func (h *hookFS) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// List implements FS.
 func (h *hookFS) List(ctx context.Context, prefix string) (*ListResult, error) {
 	return h.inner.List(ctx, prefix)
 }
 
+// Stat implements FS. Applies AfterStat hook if set.
 func (h *hookFS) Stat(ctx context.Context, key string) (*FileInfo, error) {
 	info, err := h.inner.Stat(ctx, key)
 	if err != nil {
@@ -90,6 +95,7 @@ func (h *hookFS) Stat(ctx context.Context, key string) (*FileInfo, error) {
 	return info, nil
 }
 
+// Access implements FS.
 func (h *hookFS) Access(ctx context.Context, key string) (*AccessInfo, error) {
 	return h.inner.Access(ctx, key)
 }

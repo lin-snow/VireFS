@@ -2,6 +2,7 @@ package virefs
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -39,4 +40,50 @@ func TestCleanKey(t *testing.T) {
 			t.Errorf("CleanKey(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
+}
+
+func FuzzCleanKey(f *testing.F) {
+	f.Add("")
+	f.Add("/")
+	f.Add("a/b/c")
+	f.Add("../etc/passwd")
+	f.Add("a/../../etc")
+	f.Add("a//b///c")
+	f.Add("a/./b/../c")
+	f.Add(strings.Repeat("a/", 100))
+	f.Add("hello\x00world")
+
+	f.Fuzz(func(t *testing.T, input string) {
+		cleaned, err := CleanKey(input)
+		if err != nil {
+			if !errors.Is(err, ErrInvalidKey) {
+				t.Errorf("CleanKey(%q) error should wrap ErrInvalidKey, got %v", input, err)
+			}
+			return
+		}
+
+		// Invariant: result never starts or ends with /
+		if cleaned != "" && (cleaned[0] == '/' || cleaned[len(cleaned)-1] == '/') {
+			t.Errorf("CleanKey(%q) = %q has leading/trailing slash", input, cleaned)
+		}
+
+		// Invariant: result never contains ".." as a path segment
+		if strings.HasPrefix(cleaned, "..") || strings.Contains(cleaned, "/../") || strings.HasSuffix(cleaned, "/..") {
+			t.Errorf("CleanKey(%q) = %q contains path traversal", input, cleaned)
+		}
+
+		// Invariant: result never contains double slashes
+		if strings.Contains(cleaned, "//") {
+			t.Errorf("CleanKey(%q) = %q contains double slash", input, cleaned)
+		}
+
+		// Invariant: idempotent — cleaning again yields the same result
+		again, err := CleanKey(cleaned)
+		if err != nil {
+			t.Errorf("CleanKey(%q) succeeded, but CleanKey(%q) failed: %v", input, cleaned, err)
+		}
+		if again != cleaned {
+			t.Errorf("CleanKey not idempotent: CleanKey(%q) = %q, CleanKey(%q) = %q", input, cleaned, cleaned, again)
+		}
+	})
 }

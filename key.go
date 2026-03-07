@@ -12,8 +12,7 @@ func CleanKey(raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
-	raw = strings.TrimPrefix(raw, "/")
-	raw = strings.TrimSuffix(raw, "/")
+	raw = strings.Trim(raw, "/")
 	if raw == "" {
 		return "", nil
 	}
