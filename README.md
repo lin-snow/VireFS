@@ -26,7 +26,8 @@
 ```mermaid
 flowchart TB
     app["业务代码"]
-    app -->|"key"| fsInterface["virefs.FS 接口"]
+    app -->|"key"| hooks["WithHooks\n可选拦截层"]
+    hooks --> fsInterface["virefs.FS 接口"]
 
     subgraph backends [存储后端]
         localFS["LocalFS\n本地目录"]
@@ -345,6 +346,61 @@ ObjectFS 使用 S3 `DeleteObjects` 实现高效批量删除，其他后端自动
 
 ```go
 err := virefs.BatchDelete(ctx, fs, []string{"a.txt", "b.txt", "c.txt"})
+```
+
+### Stat — 获取文件元信息（含 ContentType）
+
+`Stat` 返回的 `FileInfo` 包含 `ContentType` 字段，所有后端行为一致：
+
+- **ObjectFS**：从 S3 `HeadObject` 响应中读取真实的 Content-Type
+- **LocalFS**：通过文件扩展名推断（基于标准库 `mime.TypeByExtension`）
+
+```go
+info, _ := fs.Stat(ctx, "photos/cat.jpg")
+
+fmt.Println(info.Key)         // "photos/cat.jpg"
+fmt.Println(info.Size)        // 102400
+fmt.Println(info.ContentType) // "image/jpeg"
+
+// 直接用于填充业务数据库
+db.Exec("INSERT INTO files (key, size, content_type) VALUES (?, ?, ?)",
+    info.Key, info.Size, info.ContentType)
+```
+
+### WithHooks — 操作拦截
+
+`WithHooks` 可以给任意 FS 添加拦截逻辑，无需手写 6 个方法的转发样板。所有 hook 字段可选，nil 表示不拦截。
+
+```go
+hfs := virefs.WithHooks(fs, virefs.Hooks{
+    // 包装 Get 返回的 reader（用于计算 hash、解密等）
+    WrapGet: func(key string, rc io.ReadCloser) io.ReadCloser {
+        return myHashReader(rc)
+    },
+    // 包装 Put 的输入 reader（用于加密、压缩等）
+    WrapPut: func(key string, r io.Reader) io.Reader {
+        return myEncryptReader(r)
+    },
+    // Stat 成功后修改 FileInfo（用于补充信息）
+    AfterStat: func(key string, info *virefs.FileInfo) {
+        info.ContentType = "custom/override"
+    },
+    // Delete 成功后回调（用于日志、缓存清理等）
+    OnDelete: func(key string) {
+        log.Printf("deleted: %s", key)
+    },
+})
+
+// 像普通 FS 一样使用，hook 自动生效
+rc, _ := hfs.Get(ctx, "secret.dat")  // WrapGet 自动应用
+hfs.Put(ctx, "encrypted.bin", data)   // WrapPut 自动应用
+
+// 需要访问底层 FS 的可选接口时，通过 Unwrap 获取
+inner := hfs.Unwrap()
+if p, ok := inner.(virefs.Presigner); ok {
+    req, _ := p.PresignGet(ctx, "file.txt", 15*time.Minute)
+    fmt.Println(req.URL)
+}
 ```
 
 ### MountTable — 多后端路由（可选）

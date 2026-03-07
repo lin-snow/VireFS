@@ -32,6 +32,14 @@
 // [Schema] provides declarative key routing by file extension or custom
 // match functions, and plugs into any backend via [KeyFunc].
 //
+// # Hooks
+//
+// [WithHooks] wraps any FS with optional interceptors ([Hooks]) for
+// Get, Put, Stat and Delete — no need to implement all six FS methods
+// just to add behaviour to one. The returned hookFS deliberately does
+// not forward optional interfaces (Copier, Presigner, BatchDeleter)
+// so that all data operations pass through the hooks.
+//
 // # Helpers
 //
 // Package-level functions [Copy], [BatchDelete], [Exists], and [Walk]
