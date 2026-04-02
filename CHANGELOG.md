@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v0.1.4] - 2026-04-02
+
+### Fixed
+
+- Improve MinIO upload compatibility by setting
+  `RequestChecksumCalculationWhenRequired` in `NewS3Client` when
+  `ProviderMinIO` is used, avoiding `chunk too big` failures for larger
+  uploads.
+
+### Added
+
+- Add a regression test ensuring MinIO clients created via `NewS3Client`
+  default to `RequestChecksumCalculationWhenRequired`.
+
 ## [v0.1.3] - 2026-03-07
 
 ### Changed
@@ -67,6 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `Walk`, `Copy`, `BatchDelete`, `Exists` helper functions.
 - `plugin/zip` read-only zip archive FS.
 
+[v0.1.4]: https://github.com/lin-snow/VireFS/compare/v0.1.3...v0.1.4
 [v0.1.3]: https://github.com/lin-snow/VireFS/compare/v0.1.2...v0.1.3
 [v0.1.2]: https://github.com/lin-snow/VireFS/compare/v0.1.1...v0.1.2
 [v0.1.1]: https://github.com/lin-snow/VireFS/compare/v0.1.0...v0.1.1
