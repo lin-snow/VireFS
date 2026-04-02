@@ -69,3 +69,19 @@ func TestS3Config_Validation(t *testing.T) {
 		t.Fatal("NewObjectFSFromConfig with empty Bucket should fail")
 	}
 }
+
+func TestNewS3Client_MinIO_RequestChecksumWhenRequired(t *testing.T) {
+	client, err := NewS3Client(t.Context(), &S3Config{
+		Provider:  ProviderMinIO,
+		Region:    "us-east-1",
+		Endpoint:  "http://localhost:9000",
+		AccessKey: "x",
+		SecretKey: "y",
+	})
+	if err != nil {
+		t.Fatalf("NewS3Client failed: %v", err)
+	}
+	if got := client.Options().RequestChecksumCalculation; got != aws.RequestChecksumCalculationWhenRequired {
+		t.Fatalf("RequestChecksumCalculation = %v, want %v", got, aws.RequestChecksumCalculationWhenRequired)
+	}
+}

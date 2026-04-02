@@ -59,6 +59,10 @@ type S3Config struct {
 // NewS3Client creates an *s3.Client from the given S3Config.
 // Provider-specific quirks (path style, default region) are applied
 // automatically. The caller's S3Config is not modified.
+//
+// For ProviderMinIO, request checksum calculation is set to
+// aws.RequestChecksumCalculationWhenRequired to avoid compatibility issues with
+// aws-chunked uploads on large objects.
 func NewS3Client(ctx context.Context, cfg *S3Config) (*s3.Client, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("virefs: S3Config must not be nil")
@@ -89,6 +93,9 @@ func NewS3Client(ctx context.Context, cfg *S3Config) (*s3.Client, error) {
 		}
 		if resolved.UsePathStyle != nil && *resolved.UsePathStyle {
 			o.UsePathStyle = true
+		}
+		if resolved.Provider == ProviderMinIO {
+			o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 		}
 	})
 
